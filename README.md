@@ -176,6 +176,30 @@ aiteam selftest
 
 It creates a temporary tmux session with two panes, relays a `[PUSH]pong[/PUSH]` block, and verifies delivery.
 
+## Real-CLI E2E Test (codex / claude / agent, headless)
+
+The repository includes real end-to-end pytest cases that launch `codex`, `claude`, and `agent` in tmux panes without mocks:
+
+`tests/test_e2e_real_agents.py`
+
+The suite covers:
+- `spawn` + `list` + `capture` + `kill` with real binaries
+- a workflow path: `start` -> `add` -> `codex` -> `send` -> `relay` -> `handoff` -> `kill`
+
+It is opt-in to keep normal test runs fast/stable. Enable it with:
+
+```bash
+AITEAM_RUN_REAL_E2E=1 pytest -q tests/test_e2e_real_agents.py
+```
+
+Optional command overrides (if your headless flags differ):
+
+```bash
+AITEAM_E2E_CODEX_CMD="codex --help"
+AITEAM_E2E_CLAUDE_CMD="claude --help"
+AITEAM_E2E_AGENT_CMD="agent --help"
+```
+
 ## Commands
 
 Every long option has a strict short alias based on its initial letter (no collisions allowed per subcommand). Check each command's `--help`.
