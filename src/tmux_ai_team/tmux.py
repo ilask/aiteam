@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import re
 import subprocess
 import tempfile
 from typing import List, Optional
@@ -15,6 +16,72 @@ from typing import List, Optional
 
 class TmuxError(RuntimeError):
     pass
+
+
+_WINDOW_NOT_FOUND_RX = re.compile(r"can't find window:\s*(?P<window>.+)$", re.IGNORECASE)
+
+
+def _target_arg(args: List[str]) -> Optional[str]:
+    for i, arg in enumerate(args):
+        if arg == "-t" and i + 1 < len(args):
+            return args[i + 1]
+    return None
+
+
+def _pane_indexes_in_window_zero(session: str) -> Optional[List[int]]:
+    cp = subprocess.run(
+        ["tmux", "list-panes", "-t", f"{session}:0", "-F", "#{pane_index}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if cp.returncode != 0:
+        return None
+    indexes: List[int] = []
+    for raw in (cp.stdout or "").splitlines():
+        line = (raw or "").strip()
+        if not line.isdigit():
+            continue
+        indexes.append(int(line))
+    return sorted(set(indexes))
+
+
+def _tmux_error_hint(args: List[str], stderr: str) -> Optional[str]:
+    message = (stderr or "").strip()
+    if not message:
+        return None
+    if not _WINDOW_NOT_FOUND_RX.search(message):
+        return None
+
+    target = _target_arg(args)
+    if not target:
+        return "tmux pane targets use '<session>:<window>.<pane>'."
+
+    m = re.match(r"^(?P<session>[^:]+):(?P<index>\d+)$", target)
+    if not m:
+        return "tmux pane targets use '<session>:<window>.<pane>' (for example: 'my-session:0.2')."
+
+    session = (m.group("session") or "").strip()
+    pane_index_text = (m.group("index") or "").strip()
+    if not session or not pane_index_text.isdigit():
+        return "tmux pane targets use '<session>:<window>.<pane>' (for example: 'my-session:0.2')."
+
+    pane_index = int(pane_index_text)
+    indexes = _pane_indexes_in_window_zero(session)
+    suggestions: List[str] = []
+    suggestions.append(f"Invalid target '{target}'.")
+
+    if indexes is not None and pane_index in indexes:
+        suggestions.append(f"Did you mean '{session}:0.{pane_index}' (window 0, pane {pane_index})?")
+        suggestions.append(f"If using aiteam, prefer selector form like 'codex:{pane_index}'.")
+    elif indexes:
+        joined = ", ".join(str(i) for i in indexes)
+        suggestions.append(f"Window 0 pane indexes in '{session}' are: {joined}.")
+        suggestions.append("tmux pane targets use '<session>:<window>.<pane>'.")
+    else:
+        suggestions.append("tmux pane targets use '<session>:<window>.<pane>'.")
+
+    return " ".join(suggestions)
 
 
 def _run_tmux(args: List[str], *, check: bool = True, capture: bool = True, text: bool = True) -> subprocess.CompletedProcess:
@@ -42,6 +109,9 @@ def _run_tmux(args: List[str], *, check: bool = True, capture: bool = True, text
             msg += f"\nstdout:\n{stdout}"
         if stderr:
             msg += f"\nstderr:\n{stderr}"
+        hint = _tmux_error_hint(args, stderr)
+        if hint:
+            msg += f"\nhint:\n{hint}"
         raise TmuxError(msg) from e
 
 
