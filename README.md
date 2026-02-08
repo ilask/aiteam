@@ -52,6 +52,25 @@ If you omit `--session`, `aiteam` auto-generates one:
 - if that name already exists: adds `-2`, `-3`, ...
 - outside Git: falls back to `ai-team`
 
+### Codex Profile (Recommended)
+
+`aiteam` starts Codex with profile `aiteam` by default (`codex -p aiteam`).
+Set it once in `~/.codex/config.toml`:
+
+```toml
+[profiles.aiteam]
+model = "gpt-5.3-codex"
+model_reasoning_effort = "high"
+personality = "pragmatic"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+```
+
+### Session Briefing (AGENTS.md-Style, Ephemeral)
+
+If you want a *session-only* briefing pasted into each new Codex pane, use `--briefing` on `start`/`spawn`.
+It opens your editor (`$AITEAM_EDITOR` or `$EDITOR`) and the file is deleted automatically when the tmux session closes.
+
 Claude Code as main:
 
 ```bash

@@ -181,6 +181,25 @@ def list_panes(session: str) -> List[PaneInfo]:
     return panes
 
 
+def set_session_option(session: str, option: str, value: str) -> None:
+    """Set a session-scoped option (including user options like @foo)."""
+    _run_tmux(["set-option", "-t", session, option, value], check=False)
+
+
+def get_session_option(session: str, option: str) -> Optional[str]:
+    """Get a session-scoped option value, or None if unset."""
+    cp = _run_tmux(["show-option", "-t", session, "-v", option], check=False)
+    if cp.returncode != 0:
+        return None
+    val = (cp.stdout or "").strip()
+    return val or None
+
+
+def set_hook(session: str, hook: str, command: str) -> None:
+    """Set a tmux hook command for the session (best-effort)."""
+    _run_tmux(["set-hook", "-t", session, hook, command], check=False)
+
+
 def set_pane_title(pane_id: str, title: str) -> None:
     # tmux select-pane -t <pane> -T <title>
     _run_tmux(["select-pane", "-t", pane_id, "-T", title], check=False)

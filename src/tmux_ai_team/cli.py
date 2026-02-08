@@ -5,8 +5,10 @@ import json
 import hashlib
 import os
 import re
+import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 from typing import List, Tuple, Optional
@@ -28,6 +30,9 @@ from .tmux import (
     kill_session,
     list_sessions,
     session_exists,
+    set_session_option,
+    get_session_option,
+    set_hook,
     current_session_name,
     current_pane_id,
     pane_current_path,
@@ -55,6 +60,9 @@ def _get_last_error() -> Optional[str]:
 # Codex pane title format: "codex#<id>:<name>"
 _CODEX_TITLE_RX = re.compile(r"^codex#(?P<id>[^:]+)(?::(?P<name>.*))?$")
 _CODEX_ID_SELECTOR_RX = re.compile(r"^codex[:#](?P<id>[^:]+)$")
+_DEFAULT_CODEX_PROFILE = "aiteam"
+_DEFAULT_CODEX_COMMAND = f"codex -p {_DEFAULT_CODEX_PROFILE}"
+_BRIEFING_OPTION = "@aiteam_briefing_file"
 
 
 def _parse_codex_title(title: str) -> Optional[Tuple[str, str]]:
@@ -234,6 +242,86 @@ def _resolve_new_session_name(*, requested: Optional[str], cwd: str) -> Tuple[st
     return _next_available_session_name(base), True
 
 
+def _create_briefing_file(*, session: str, cwd: str) -> str:
+    safe = _sanitize_session_name(session)
+    fd, path = tempfile.mkstemp(prefix=f"aiteam_briefing_{safe}_", suffix=".md")
+    os.close(fd)
+
+    text = (
+        "AITEAM SESSION BRIEFING (ephemeral)\n"
+        "\n"
+        "This text is pasted into each new Codex pane in this tmux session.\n"
+        "It is deleted automatically when the tmux session closes.\n"
+        "\n"
+        f"Session: {session}\n"
+        f"Workdir: {cwd}\n"
+        "\n"
+        "Instructions:\n"
+        "\n"
+    )
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
+def _edit_file(path: str) -> None:
+    editor = (os.environ.get("AITEAM_EDITOR") or os.environ.get("EDITOR") or "").strip()
+    if not editor:
+        editor = "nano"
+    cmd = shlex.split(editor) + [path]
+    cp = subprocess.run(cmd, check=False)
+    if cp.returncode != 0:
+        raise TmuxError(f"Editor exited with non-zero status {cp.returncode}: {' '.join(cmd)}")
+
+
+def _install_session_briefing(session: str, path: str) -> None:
+    set_session_option(session, _BRIEFING_OPTION, path)
+    cleanup_cmd = f"run-shell \"rm -f -- {shlex.quote(path)}\""
+    set_hook(session, "session-closed", cleanup_cmd)
+
+
+def _load_session_briefing_text(session: str) -> Optional[str]:
+    path = get_session_option(session, _BRIEFING_OPTION)
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    text = (text or "").strip()
+    return text or None
+
+
+def _is_codex_command(command: str) -> bool:
+    s = (command or "").strip()
+    if not s:
+        return False
+    try:
+        parts = shlex.split(s, posix=True)
+    except Exception:
+        parts = s.split()
+    if not parts:
+        return False
+    i = 0
+    # Skip leading VAR=VAL style env assignments.
+    while i < len(parts) and ("=" in parts[i] and not parts[i].startswith("-")):
+        i += 1
+    if i >= len(parts):
+        return False
+    return os.path.basename(parts[i]) == "codex"
+
+
+def _maybe_paste_briefing(*, session: str, pane_id: str, command: str) -> None:
+    if not _is_codex_command(command):
+        return
+    text = _load_session_briefing_text(session)
+    if not text:
+        return
+    time.sleep(0.8)
+    paste_text(pane_id, text, enter=True)
+
+
 def _strict_short_flag(long_flag: str) -> str:
     """Return strict short flag derived from the first alnum in the long flag."""
     name = (long_flag or "").strip().lstrip("-")
@@ -398,7 +486,7 @@ def _find_pane(session: str, selector: str) -> str:
 def cmd_spawn(args: argparse.Namespace) -> int:
     agents = args.agent
     if not agents:
-        agents = ["claude=claude", "codex=codex"]
+        agents = ["claude=claude", f"codex={_DEFAULT_CODEX_COMMAND}"]
 
     try:
         agent_pairs = _parse_agents(agents)
@@ -417,12 +505,21 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         requested=getattr(args, "session", None),
         cwd=cwd,
     )
+    briefing_path: Optional[str] = None
+    session_created = False
 
     try:
+        if getattr(args, "briefing", False):
+            briefing_path = _create_briefing_file(session=session, cwd=cwd)
+            _edit_file(briefing_path)
+
         _eprint(f"tmux: {tmux_version()}")
         if auto_session:
             _eprint(f"session(auto): {session}")
         new_session(session, cwd=cwd, force=args.force)
+        session_created = True
+        if briefing_path:
+            _install_session_briefing(session, briefing_path)
 
         # Create panes
         if n == 1:
@@ -452,12 +549,18 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             set_pane_title(pane_id, name)
             # Run agent command
             paste_text(pane_id, command, enter=True)
+            _maybe_paste_briefing(session=session, pane_id=pane_id, command=command)
 
         if args.attach:
             tmux_attach(session)
         return 0
 
     except TmuxError as e:
+        if briefing_path and not session_created:
+            try:
+                os.unlink(briefing_path)
+            except Exception:
+                pass
         _set_last_error(str(e))
         _eprint(str(e))
         return 1
@@ -498,7 +601,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             title = "cursor"
     elif main == "codex":
         if cmd is None:
-            cmd = "codex"
+            cmd = _DEFAULT_CODEX_COMMAND
         if title is None:
             title = "codex"
     else:
@@ -513,12 +616,21 @@ def cmd_start(args: argparse.Namespace) -> int:
         requested=getattr(args, "session", None),
         cwd=cwd,
     )
+    briefing_path: Optional[str] = None
+    session_created = False
 
     try:
+        if getattr(args, "briefing", False):
+            briefing_path = _create_briefing_file(session=session, cwd=cwd)
+            _edit_file(briefing_path)
+
         _eprint(f"tmux: {tmux_version()}")
         if auto_session:
             _eprint(f"session(auto): {session}")
         new_session(session, cwd=cwd, force=args.force)
+        session_created = True
+        if briefing_path:
+            _install_session_briefing(session, briefing_path)
 
         panes = list_panes(session)
         if not panes:
@@ -526,11 +638,17 @@ def cmd_start(args: argparse.Namespace) -> int:
         pane_id = panes[0].pane_id
         set_pane_title(pane_id, title)
         paste_text(pane_id, cmd, enter=True)
+        _maybe_paste_briefing(session=session, pane_id=pane_id, command=cmd)
 
         if args.attach:
             tmux_attach(session)
         return 0
     except TmuxError as e:
+        if briefing_path and not session_created:
+            try:
+                os.unlink(briefing_path)
+            except Exception:
+                pass
         _set_last_error(str(e))
         _eprint(str(e))
         return 1
@@ -645,6 +763,7 @@ def cmd_add(args: argparse.Namespace) -> int:
         # Configure pane + start agent.
         set_pane_title(new_pane, name)
         paste_text(new_pane, command, enter=True)
+        _maybe_paste_briefing(session=session, pane_id=new_pane, command=command)
 
         # Optional tiling for 3+ panes.
         if layout == "tiled" or getattr(args, "tiled", False):
@@ -707,7 +826,7 @@ def cmd_codex(args: argparse.Namespace) -> int:
         add_args = argparse.Namespace(**vars(args))
         setattr(add_args, "agent", None)
         setattr(add_args, "name", title)
-        setattr(add_args, "command", getattr(args, "command", "codex"))
+        setattr(add_args, "command", getattr(args, "command", _DEFAULT_CODEX_COMMAND))
         # For Codex instances, pane-title collisions should be treated as errors.
         setattr(add_args, "if_exists", "error")
 
@@ -828,7 +947,13 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_kill(args: argparse.Namespace) -> int:
     try:
+        briefing_path = get_session_option(args.session, _BRIEFING_OPTION)
         kill_session(args.session)
+        if briefing_path:
+            try:
+                os.unlink(briefing_path)
+            except Exception:
+                pass
         return 0
     except TmuxError as e:
         _set_last_error(str(e))
@@ -1079,7 +1204,7 @@ def _auto_start_error_analyzer_codex(args: argparse.Namespace, *, error_text: st
         set_pane_title(new_pane_id, title)
 
         # Start Codex and feed it the prompt.
-        paste_text(new_pane_id, "codex", enter=True)
+        paste_text(new_pane_id, _DEFAULT_CODEX_COMMAND, enter=True)
         time.sleep(0.6)
 
         prompt = _build_error_analyzer_prompt(
@@ -1128,6 +1253,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="tmux session name (default: auto from git repo name, preferring remote names; with -2/-3... on conflicts; fallback: ai-team)",
     )
     sp.add_argument("--cwd", default=None, help="Working directory for panes (default: current directory)")
+    sp.add_argument(
+        "--briefing",
+        action="store_true",
+        help="Open an editor to create an ephemeral session briefing (pasted into new Codex panes).",
+    )
     sp.add_argument("--layout", choices=["vertical", "horizontal", "tiled"], default="vertical",
                     help="Pane split layout for 2 agents. For 3+ agents, layout becomes tiled. (default: vertical)")
     sp.add_argument("--worker", dest="agent", action="append", default=[], help="Worker definition: name=command (repeatable)")
@@ -1142,6 +1272,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="tmux session name (default: auto from git repo name, preferring remote names; with -2/-3... on conflicts; fallback: ai-team)",
     )
     sp.add_argument("--cwd", default=None, help="Working directory for the session (default: current directory)")
+    sp.add_argument(
+        "--briefing",
+        action="store_true",
+        help="Open an editor to create an ephemeral session briefing (pasted into new Codex panes).",
+    )
     sp.add_argument("--main", choices=["claude", "cursor", "codex", "custom"], default="claude", help="Which main agent to start (default: claude)")
     sp.add_argument("--exec", dest="command", default=None, help="Command to start the main agent (overrides the default for --main)")
     sp.add_argument("--title", default=None, help="Pane title for the main agent (default: claude/cursor/codex/main)")
@@ -1198,7 +1333,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Codex instance id (unique within session). If omitted, auto-allocates a numeric id.",
     )
     sp.add_argument("--name", default="codex", help="Codex instance label (shown in pane title).")
-    sp.add_argument("--exec", dest="command", default="codex", help="Command to start Codex (default: codex)")
+    sp.add_argument("--exec", dest="command", default=_DEFAULT_CODEX_COMMAND, help=f"Command to start Codex (default: {_DEFAULT_CODEX_COMMAND})")
     sp.add_argument("--cwd", default=None, help="Working directory for the new pane (default: current directory)")
     sp.add_argument(
         "--layout",
