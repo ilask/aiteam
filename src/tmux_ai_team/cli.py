@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import hashlib
 import os
@@ -37,6 +38,7 @@ from .tmux import (
     current_pane_id,
     pane_current_path,
     select_pane,
+    send_keys,
 )
 
 
@@ -960,6 +962,11 @@ def cmd_send(args: argparse.Namespace) -> int:
         target_pane = _find_pane(args.session, args.to)
         text = _read_text_input(args)
         paste_text(target_pane, text, enter=(not args.no_enter))
+        # Codex sometimes keeps multiline input in compose mode after the first Enter.
+        # For Codex panes, send one extra Enter as a safe confirmation.
+        if (not args.no_enter) and ("\n" in text) and _is_codex_pane(args.session, target_pane):
+            time.sleep(0.08)
+            send_keys(target_pane, ["C-m"])
         return 0
     except TmuxError as e:
         _set_last_error(str(e))
@@ -1309,6 +1316,13 @@ def cmd_relay(args: argparse.Namespace) -> int:
 _ERROR_ANALYZER_GUARD = False
 
 
+def _is_codex_pane(session: str, pane_id: str) -> bool:
+    for _cid, _cname, pane in _list_codex_panes(session):
+        if pane.pane_id == pane_id:
+            return True
+    return False
+
+
 def _error_codex_already_running(session: str) -> bool:
     for cid, cname, _p in _list_codex_panes(session):
         if cname in {"error", "error-analyzer", "error_analysis", "erroranalysis"}:
@@ -1316,6 +1330,48 @@ def _error_codex_already_running(session: str) -> bool:
         if cid.startswith("err"):
             return True
     return False
+
+
+def _error_analyzer_lock_path(session: str) -> str:
+    safe_session = re.sub(r"[^A-Za-z0-9_.-]+", "_", (session or "unknown")).strip("._")
+    if not safe_session:
+        safe_session = "unknown"
+    return os.path.join(tempfile.gettempdir(), f"aiteam-error-analyzer-{safe_session}.lock")
+
+
+@contextmanager
+def _acquire_error_analyzer_lock(session: str):
+    """Cross-process lock to avoid spawning duplicate error analyzer panes."""
+    fd = os.open(_error_analyzer_lock_path(session), os.O_CREAT | os.O_RDWR, 0o600)
+    lock_mod = None
+    locked = False
+    try:
+        try:
+            import fcntl as _fcntl
+            lock_mod = _fcntl
+        except Exception:
+            # Best-effort on platforms without fcntl.
+            yield True
+            return
+
+        try:
+            lock_mod.flock(fd, lock_mod.LOCK_EX | lock_mod.LOCK_NB)
+            locked = True
+        except BlockingIOError:
+            yield False
+            return
+
+        yield True
+    finally:
+        if locked and lock_mod is not None:
+            try:
+                lock_mod.flock(fd, lock_mod.LOCK_UN)
+            except Exception:
+                pass
+        try:
+            os.close(fd)
+        except Exception:
+            pass
 
 
 def _build_error_analyzer_prompt(*, error_text: str, argv: List[str], session: str) -> str:
@@ -1391,69 +1447,73 @@ def _auto_start_error_analyzer_codex(args: argparse.Namespace, *, error_text: st
         except Exception:
             return
 
-        # Avoid spawning multiple error analyzers.
-        if _error_codex_already_running(session):
-            return
-
-        cid = _next_prefixed_codex_id(session, "err")
-        title = f"codex#{cid}:error"
-
-        # Split from current pane if possible; otherwise split from the first pane in the session.
-        orig_pane: Optional[str] = None
-        try:
-            orig_pane = current_pane_id()
-            split_target = orig_pane
-        except Exception:
-            panes = list_panes(session)
-            if not panes:
+        with _acquire_error_analyzer_lock(session) as lock_acquired:
+            if not lock_acquired:
                 return
-            split_target = panes[0].pane_id
 
-        try:
-            cwd = pane_current_path(split_target)
-        except Exception:
-            cwd = os.getcwd()
+            # Avoid spawning multiple error analyzers.
+            if _error_codex_already_running(session):
+                return
 
-        before = {p.pane_id for p in list_panes(session)}
-        split_from(split_target, cwd=cwd, vertical=True)
+            cid = _next_prefixed_codex_id(session, "err")
+            title = f"codex#{cid}:error"
 
-        # Identify new pane
-        new_pane_id: Optional[str] = None
-        after = list_panes(session)
-        new_panes = [p for p in after if p.pane_id not in before]
-        if len(new_panes) == 1:
-            new_pane_id = new_panes[0].pane_id
-        elif len(new_panes) > 1:
-            # Pick the highest pane index as best-effort.
-            new_panes.sort(key=lambda p: p.pane_index)
-            new_pane_id = new_panes[-1].pane_id
-        else:
+            # Split from current pane if possible; otherwise split from the first pane in the session.
+            orig_pane: Optional[str] = None
             try:
-                new_pane_id = current_pane_id()
+                orig_pane = current_pane_id()
+                split_target = orig_pane
             except Exception:
-                return
+                panes = list_panes(session)
+                if not panes:
+                    return
+                split_target = panes[0].pane_id
 
-        set_pane_title(new_pane_id, title)
+            try:
+                cwd = pane_current_path(split_target)
+            except Exception:
+                cwd = os.getcwd()
 
-        # Start Codex and feed it the prompt.
-        paste_text(new_pane_id, _DEFAULT_CODEX_COMMAND, enter=True)
-        time.sleep(0.6)
+            before = {p.pane_id for p in list_panes(session)}
+            split_from(split_target, cwd=cwd, vertical=True)
 
-        prompt = _build_error_analyzer_prompt(
-            error_text=error_text,
-            argv=["aiteam", *getattr(args, "_argv", [])],
-            session=session,
-        )
-        paste_text(new_pane_id, prompt, enter=True)
+            # Identify new pane
+            new_pane_id: Optional[str] = None
+            after = list_panes(session)
+            new_panes = [p for p in after if p.pane_id not in before]
+            if len(new_panes) == 1:
+                new_pane_id = new_panes[0].pane_id
+            elif len(new_panes) > 1:
+                # Pick the highest pane index as best-effort.
+                new_panes.sort(key=lambda p: p.pane_index)
+                new_pane_id = new_panes[-1].pane_id
+            else:
+                try:
+                    new_pane_id = current_pane_id()
+                except Exception:
+                    return
 
-        # Make things visible when panes grow.
-        select_layout_tiled(session)
+            set_pane_title(new_pane_id, title)
 
-        # Return focus to where the user was.
-        if orig_pane:
-            select_pane(orig_pane)
+            # Start Codex and feed it the prompt.
+            paste_text(new_pane_id, _DEFAULT_CODEX_COMMAND, enter=True)
+            time.sleep(0.6)
 
-        _eprint(f"Auto-started error-analyzer Codex: codex:{cid} (pane title: {title})")
+            prompt = _build_error_analyzer_prompt(
+                error_text=error_text,
+                argv=["aiteam", *getattr(args, "_argv", [])],
+                session=session,
+            )
+            paste_text(new_pane_id, prompt, enter=True)
+
+            # Make things visible when panes grow.
+            select_layout_tiled(session)
+
+            # Return focus to where the user was.
+            if orig_pane:
+                select_pane(orig_pane)
+
+            _eprint(f"Auto-started error-analyzer Codex: codex:{cid} (pane title: {title})")
     finally:
         _ERROR_ANALYZER_GUARD = False
 

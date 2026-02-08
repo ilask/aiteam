@@ -233,6 +233,12 @@ def paste_text(pane_id: str, text: str, *, enter: bool = True) -> None:
 
     If enter=True, also sends Enter after pasting.
     """
+    # tmux does not reliably keep empty buffers. Treat empty text as an Enter-only/no-op send.
+    if text == "":
+        if enter:
+            _run_tmux(["send-keys", "-t", pane_id, "C-m"])
+        return
+
     bufname = _load_buffer_from_text(text)
     try:
         _run_tmux(["paste-buffer", "-b", bufname, "-t", pane_id])

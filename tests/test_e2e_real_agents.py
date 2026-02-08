@@ -86,6 +86,23 @@ def _wait_capture_contains(session: str, pane: str, needle: str, *, timeout_sec:
     raise AssertionError(f"Timed out waiting '{needle}' in pane '{pane}'. Last:\n{last}")
 
 
+def _error_pane_titles(session: str) -> list[str]:
+    cp = subprocess.run(
+        ["tmux", "list-panes", "-t", session, "-F", "#{pane_title}"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if cp.returncode != 0:
+        return []
+    titles = []
+    for raw in (cp.stdout or "").splitlines():
+        title = raw.strip()
+        if title.startswith("codex#err") and title.endswith(":error"):
+            titles.append(title)
+    return titles
+
+
 @pytest.mark.skipif(not _env_enabled(), reason="Set AITEAM_RUN_REAL_E2E=1 to run real-agent e2e tests.")
 def test_spawn_real_codex_claude_agent_headless() -> None:
     if shutil.which("tmux") is None:
@@ -344,5 +361,83 @@ def test_error_codex_autostarts_when_enabled() -> None:
 
         err_out = _wait_capture_contains(session, "codex:err1", "Please respond with:", timeout_sec=40.0)
         assert "No Codex pane with id '999'" in err_out
+    finally:
+        _run_aiteam(["kill", "--session", session], check=False)
+
+
+@pytest.mark.skipif(not _env_enabled(), reason="Set AITEAM_RUN_REAL_E2E=1 to run real-agent e2e tests.")
+def test_error_codex_parallel_failures_spawn_only_one_error_pane() -> None:
+    # Purpose: concurrent failures should not create duplicate codex#err* panes.
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+    if shutil.which("codex") is None:
+        pytest.skip("codex is not installed")
+
+    session = f"aiteam-e2e-err-race-{os.getpid()}-{int(time.time())}"
+    try:
+        _run_aiteam(
+            [
+                "start",
+                "--session",
+                session,
+                "--cwd",
+                str(ROOT),
+                "--main",
+                "custom",
+                "--title",
+                "main",
+                "--exec",
+                "bash",
+            ],
+            timeout=60,
+        )
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "tmux_ai_team",
+            "--error-codex",
+            "capture",
+            "--session",
+            session,
+            "--from",
+            "codex:999",
+            "--lines",
+            "20",
+        ]
+
+        p1 = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            env=_aiteam_env(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        p2 = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            env=_aiteam_env(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        o1, e1 = p1.communicate(timeout=90)
+        o2, e2 = p2.communicate(timeout=90)
+
+        assert p1.returncode == 1, f"stdout={o1}\nstderr={e1}"
+        assert p2.returncode == 1, f"stdout={o2}\nstderr={e2}"
+
+        _wait_capture_contains(session, "codex:err1", "Please respond with:", timeout_sec=40.0)
+
+        deadline = time.time() + 15.0
+        err_titles: list[str] = []
+        while time.time() < deadline:
+            err_titles = _error_pane_titles(session)
+            if len(err_titles) == 1:
+                break
+            time.sleep(0.3)
+
+        assert len(err_titles) == 1, f"expected exactly one error pane, got: {err_titles}"
     finally:
         _run_aiteam(["kill", "--session", session], check=False)
