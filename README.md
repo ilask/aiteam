@@ -45,25 +45,32 @@ You’ll get the `aiteam` command.
 
 ### 0) Start a session with **one main agent** (Claude, Cursor, or Codex)
 
+If you omit `--session`, `aiteam` auto-generates one:
+
+- inside a Git repo: preferred remote repo name
+  - priority: `origin` -> `origin*` (lexicographic) -> other remotes (lexicographic) -> local top-level directory name
+- if that name already exists: adds `-2`, `-3`, ...
+- outside Git: falls back to `ai-team`
+
 Claude Code as main:
 
 ```bash
-aiteam start --session myproj --cwd /path/to/project --main claude --attach
+aiteam start --cwd /path/to/project --main claude --attach
 ```
 
 Cursor CLI as main (command is `agent`):
 
 ```bash
-aiteam start --session myproj --cwd /path/to/project --main cursor --attach
+aiteam start --cwd /path/to/project --main cursor --attach
 
 # or:
-aiteam start --session myproj --cwd /path/to/project --main custom --title cursor --command "agent" --attach
+aiteam start --cwd /path/to/project --main custom --title cursor --command "agent" --attach
 ```
 
 Codex as main:
 
 ```bash
-aiteam start --session myproj --cwd /path/to/project --main codex --attach
+aiteam start --cwd /path/to/project --main codex --attach
 ```
 
 ### 1) From inside the main pane, spawn Codex panes (multiple OK)

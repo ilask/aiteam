@@ -5,10 +5,12 @@ import json
 import hashlib
 import os
 import re
+import subprocess
 import sys
 import time
 import traceback
 from typing import List, Tuple, Optional
+from urllib.parse import urlparse
 
 from . import __version__
 from .tmux import (
@@ -25,6 +27,7 @@ from .tmux import (
     attach as tmux_attach,
     kill_session,
     list_sessions,
+    session_exists,
     current_session_name,
     current_pane_id,
     pane_current_path,
@@ -102,6 +105,133 @@ def _next_prefixed_codex_id(session: str, prefix: str) -> str:
             except Exception:
                 pass
     return f"{prefix}{max_n + 1}"
+
+
+def _sanitize_session_name(raw: str) -> str:
+    """Sanitize a string into a tmux session-name-friendly token."""
+    s = (raw or "").strip()
+    if not s:
+        return "ai-team"
+    s = re.sub(r"\s+", "-", s)
+    s = re.sub(r"[/:\\]+", "-", s)
+    s = re.sub(r"[^\w-]+", "-", s, flags=re.UNICODE)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s or "ai-team"
+
+
+def _git_toplevel(cwd: str) -> Optional[str]:
+    cp = subprocess.run(
+        ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if cp.returncode != 0:
+        return None
+    top = (cp.stdout or "").strip()
+    if not top:
+        return None
+    return top
+
+
+def _repo_name_from_remote_url(url: str) -> Optional[str]:
+    u = (url or "").strip()
+    if not u:
+        return None
+
+    if "://" in u:
+        parsed = urlparse(u)
+        path = (parsed.path or "").strip()
+        name = os.path.basename(path.rstrip("/"))
+    else:
+        # SCP-like URL: git@host:owner/repo.git
+        if ":" in u and not u.startswith("/"):
+            path = u.split(":", 1)[1]
+            name = os.path.basename(path.rstrip("/"))
+        else:
+            name = os.path.basename(u.rstrip("/"))
+
+    if name.endswith(".git"):
+        name = name[:-4]
+    name = name.strip()
+    return name or None
+
+
+def _git_remote_names(cwd: str) -> List[str]:
+    cp = subprocess.run(
+        ["git", "-C", cwd, "remote"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if cp.returncode != 0:
+        return []
+    remotes = [(line or "").strip() for line in (cp.stdout or "").splitlines()]
+    remotes = [r for r in remotes if r]
+    return remotes
+
+
+def _remote_priority_key(name: str) -> Tuple[int, str]:
+    if name == "origin":
+        return (0, name)
+    if name.startswith("origin"):
+        return (1, name)
+    return (2, name)
+
+
+def _git_repo_name(cwd: str) -> Optional[str]:
+    """Return preferred git repo name for cwd.
+
+    Priority:
+      1) remote named "origin"
+      2) remotes starting with "origin" (lexicographic)
+      3) all other remotes (lexicographic)
+      4) local top-level directory name
+    """
+    remotes = sorted(_git_remote_names(cwd), key=_remote_priority_key)
+    for remote in remotes:
+        cp = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", remote],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if cp.returncode != 0:
+            continue
+        name = _repo_name_from_remote_url((cp.stdout or "").strip())
+        if name:
+            return name
+
+    top = _git_toplevel(cwd)
+    if not top:
+        return None
+    return os.path.basename(top.rstrip("/\\")) or None
+
+
+def _next_available_session_name(base: str) -> str:
+    """Return base, or base-2/base-3... if the session already exists."""
+    if not session_exists(base):
+        return base
+    n = 2
+    while True:
+        candidate = f"{base}-{n}"
+        if not session_exists(candidate):
+            return candidate
+        n += 1
+
+
+def _resolve_new_session_name(*, requested: Optional[str], cwd: str) -> Tuple[str, bool]:
+    """Resolve session name for commands that create a new session.
+
+    Returns (session_name, is_auto).
+    """
+    req = (requested or "").strip()
+    if req:
+        return req, False
+
+    repo = _git_repo_name(cwd)
+    base = _sanitize_session_name(repo) if repo else "ai-team"
+    return _next_available_session_name(base), True
 
 
 def _parse_agents(agent_args: List[str]) -> List[Tuple[str, str]]:
@@ -199,28 +329,34 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         return 2
 
     cwd = args.cwd or os.getcwd()
+    session, auto_session = _resolve_new_session_name(
+        requested=getattr(args, "session", None),
+        cwd=cwd,
+    )
 
     try:
         _eprint(f"tmux: {tmux_version()}")
-        new_session(args.session, cwd=cwd, force=args.force)
+        if auto_session:
+            _eprint(f"session(auto): {session}")
+        new_session(session, cwd=cwd, force=args.force)
 
         # Create panes
         if n == 1:
             pass
         elif n == 2:
             vertical = (args.layout == "vertical")
-            split_window(args.session, cwd=cwd, vertical=vertical)
+            split_window(session, cwd=cwd, vertical=vertical)
         else:
             # Create N-1 splits, then tile.
             # Alternate split direction to reduce extreme aspect ratios.
             vertical = True
             for _ in range(n - 1):
-                split_window(args.session, cwd=cwd, vertical=vertical)
+                split_window(session, cwd=cwd, vertical=vertical)
                 vertical = not vertical
-            select_layout_tiled(args.session)
+            select_layout_tiled(session)
 
         # Set titles + run commands
-        panes = list_panes(args.session)
+        panes = list_panes(session)
         if len(panes) != n:
             # This can happen with older tmux quirks; still proceed best-effort.
             _eprint(f"Warning: expected {n} panes but found {len(panes)} panes. Mapping will be best-effort.")
@@ -234,7 +370,7 @@ def cmd_spawn(args: argparse.Namespace) -> int:
             paste_text(pane_id, command, enter=True)
 
         if args.attach:
-            tmux_attach(args.session)
+            tmux_attach(session)
         return 0
 
     except TmuxError as e:
@@ -254,10 +390,10 @@ def cmd_start(args: argparse.Namespace) -> int:
       - spawn Codex panes later via `aiteam codex ...`
 
     Examples:
-      aiteam start --session myproj --main claude --attach
-      aiteam start --session myproj --main cursor --attach
-      aiteam start --session myproj --main codex --attach
-      aiteam start --session myproj --main custom --command "agent" --title cursor --attach
+      aiteam start --main claude --attach
+      aiteam start --main cursor --attach
+      aiteam start --main codex --attach
+      aiteam start --main custom --command "agent" --title cursor --attach
     """
     main = (getattr(args, "main", None) or "claude").strip().lower()
     cmd = (getattr(args, "command", None) or "").strip() or None
@@ -289,20 +425,26 @@ def cmd_start(args: argparse.Namespace) -> int:
             title = "main"
 
     cwd = args.cwd or os.getcwd()
+    session, auto_session = _resolve_new_session_name(
+        requested=getattr(args, "session", None),
+        cwd=cwd,
+    )
 
     try:
         _eprint(f"tmux: {tmux_version()}")
-        new_session(args.session, cwd=cwd, force=args.force)
+        if auto_session:
+            _eprint(f"session(auto): {session}")
+        new_session(session, cwd=cwd, force=args.force)
 
-        panes = list_panes(args.session)
+        panes = list_panes(session)
         if not panes:
-            raise TmuxError(f"No panes found in session '{args.session}' after creating it.")
+            raise TmuxError(f"No panes found in session '{session}' after creating it.")
         pane_id = panes[0].pane_id
         set_pane_title(pane_id, title)
         paste_text(pane_id, cmd, enter=True)
 
         if args.attach:
-            tmux_attach(args.session)
+            tmux_attach(session)
         return 0
     except TmuxError as e:
         _set_last_error(str(e))
@@ -916,7 +1058,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("spawn", help="Create a tmux session, split panes, and start agent commands.")
-    sp.add_argument("--session", default="ai-team", help="tmux session name (default: ai-team)")
+    sp.add_argument(
+        "--session",
+        default=None,
+        help="tmux session name (default: auto from git repo name, preferring remote names; with -2/-3... on conflicts; fallback: ai-team)",
+    )
     sp.add_argument("--cwd", default=None, help="Working directory for panes (default: current directory)")
     sp.add_argument("--layout", choices=["vertical", "horizontal", "tiled"], default="vertical",
                     help="Pane split layout for 2 agents. For 3+ agents, layout becomes tiled. (default: vertical)")
@@ -926,7 +1072,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_spawn)
 
     sp = sub.add_parser("start", help="Create a tmux session with a single main agent pane (Claude/Cursor/Codex).")
-    sp.add_argument("--session", default="ai-team", help="tmux session name (default: ai-team)")
+    sp.add_argument(
+        "--session",
+        default=None,
+        help="tmux session name (default: auto from git repo name, preferring remote names; with -2/-3... on conflicts; fallback: ai-team)",
+    )
     sp.add_argument("--cwd", default=None, help="Working directory for the session (default: current directory)")
     sp.add_argument("--main", choices=["claude", "cursor", "codex", "custom"], default="claude", help="Which main agent to start (default: claude)")
     sp.add_argument("--command", default=None, help="Command to start the main agent (overrides the default for --main)")
