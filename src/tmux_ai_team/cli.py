@@ -379,11 +379,15 @@ def cmd_add(args: argparse.Namespace) -> int:
         # Determine working directory for the new pane.
         cwd = getattr(args, "cwd", None)
         if cwd is None:
-            # Prefer tmux-reported path when running inside tmux.
+            # Prefer the caller's current directory when available.
             try:
-                cwd = pane_current_path()
-            except Exception:
                 cwd = os.getcwd()
+            except Exception:
+                # Fallback: use tmux-reported path from the split target pane.
+                try:
+                    cwd = pane_current_path(split_target)
+                except Exception:
+                    cwd = None
 
         # Perform the split.
         layout = getattr(args, "layout", "vertical")
@@ -939,7 +943,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--agent", default=None, help="Agent definition: name=command (alternative to --name/--command)")
     sp.add_argument("--name", default=None, help="Agent name (pane title)")
     sp.add_argument("--command", default=None, help="Command to run in the new pane")
-    sp.add_argument("--cwd", default=None, help="Working directory for the new pane (default: current pane path)")
+    sp.add_argument("--cwd", default=None, help="Working directory for the new pane (default: current directory)")
     sp.add_argument(
         "--layout",
         choices=["vertical", "horizontal"],
@@ -980,7 +984,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("--name", default="codex", help="Codex instance label (shown in pane title).")
     sp.add_argument("--command", default="codex", help="Command to start Codex (default: codex)")
-    sp.add_argument("--cwd", default=None, help="Working directory for the new pane (default: current pane path)")
+    sp.add_argument("--cwd", default=None, help="Working directory for the new pane (default: current directory)")
     sp.add_argument(
         "--layout",
         choices=["vertical", "horizontal"],
