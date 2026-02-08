@@ -1348,15 +1348,27 @@ def _build_error_analyzer_prompt(*, error_text: str, argv: List[str], session: s
     )
 
 
+def _is_error_codex_enabled(args: argparse.Namespace) -> bool:
+    """Return whether auto error-analyzer Codex should run for this invocation."""
+    disable_env = (os.environ.get("AITEAM_DISABLE_ERROR_CODEX") or "").strip().lower()
+    if getattr(args, "no_error_codex", False) or disable_env in {"1", "true", "yes"}:
+        return False
+
+    enable_env = (os.environ.get("AITEAM_ENABLE_ERROR_CODEX") or "").strip().lower()
+    if getattr(args, "error_codex", False) or enable_env in {"1", "true", "yes"}:
+        return True
+
+    # Default policy: OFF until explicitly enabled.
+    return False
+
+
 def _auto_start_error_analyzer_codex(args: argparse.Namespace, *, error_text: str) -> None:
     """Best-effort: if aiteam fails inside tmux, spin up a dedicated Codex pane to analyze the error."""
     global _ERROR_ANALYZER_GUARD
     if _ERROR_ANALYZER_GUARD:
         return
 
-    if getattr(args, "no_error_codex", False):
-        return
-    if os.environ.get("AITEAM_DISABLE_ERROR_CODEX", "").strip() in {"1", "true", "yes"}:
+    if not _is_error_codex_enabled(args):
         return
 
     # Only trigger on "control" errors (exit code 1). Don't launch a Codex just for argument mistakes.
@@ -1456,9 +1468,14 @@ def build_parser() -> argparse.ArgumentParser:
     _enable_auto_short_options(p)
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument(
+        "--error-codex",
+        action="store_true",
+        help="Enable auto-starting an error-analyzer Codex pane when aiteam encounters a tmux/control error.",
+    )
+    p.add_argument(
         "--no-error-codex",
         action="store_true",
-        help="Disable auto-starting an error-analyzer Codex pane when aiteam encounters a tmux/control error.",
+        help="Disable auto-starting an error-analyzer Codex pane (overrides --error-codex and env enable flags).",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 

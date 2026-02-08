@@ -297,3 +297,52 @@ def test_real_workflow_start_add_codex_send_handoff_relay() -> None:
         assert "E2E_HANDOFF_PAYLOAD" in sink_after_handoff
     finally:
         _run_aiteam(["kill", "--session", session], check=False)
+
+
+@pytest.mark.skipif(not _env_enabled(), reason="Set AITEAM_RUN_REAL_E2E=1 to run real-agent e2e tests.")
+def test_error_codex_autostarts_when_enabled() -> None:
+    if shutil.which("tmux") is None:
+        pytest.skip("tmux is not installed")
+    if shutil.which("codex") is None:
+        pytest.skip("codex is not installed")
+
+    session = f"aiteam-e2e-err-{os.getpid()}-{int(time.time())}"
+    try:
+        _run_aiteam(
+            [
+                "start",
+                "--session",
+                session,
+                "--cwd",
+                str(ROOT),
+                "--main",
+                "custom",
+                "--title",
+                "main",
+                "--exec",
+                "bash",
+            ],
+            timeout=60,
+        )
+
+        cp = _run_aiteam(
+            [
+                "--error-codex",
+                "capture",
+                "--session",
+                session,
+                "--from",
+                "codex:999",
+                "--lines",
+                "20",
+            ],
+            timeout=60,
+            check=False,
+        )
+        assert cp.returncode == 1
+        assert "No Codex pane with id '999'" in (cp.stderr or "")
+
+        err_out = _wait_capture_contains(session, "codex:err1", "Please respond with:", timeout_sec=40.0)
+        assert "No Codex pane with id '999'" in err_out
+    finally:
+        _run_aiteam(["kill", "--session", session], check=False)

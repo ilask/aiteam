@@ -227,10 +227,13 @@ help output also shows a short status line indicating the detected agent context
 
 ## Auto error-analyzer Codex
 
-If an `aiteam` command fails with a tmux/control error (exit code 1) **and you're inside tmux**,
+Auto error-analyzer Codex is now **disabled by default**.
+
+When enabled, if an `aiteam` command fails with a tmux/control error (exit code 1) **and you're inside tmux**,
 `aiteam` will *best-effort* start a dedicated Codex pane titled like:
 
 `codex#err1:error`
 
 …and paste a structured prompt containing the error + environment details.
-Disable with `--no-error-codex` or `AITEAM_DISABLE_ERROR_CODEX=1`.
+Enable with `--error-codex` or `AITEAM_ENABLE_ERROR_CODEX=1`.
+Disable explicitly with `--no-error-codex` or `AITEAM_DISABLE_ERROR_CODEX=1`.
