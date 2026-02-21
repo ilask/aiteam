@@ -1,5 +1,25 @@
 # aiteam Worklog
 
+## 2026/02/21 13:33:26 (JST)
+*   **目的:** 
+    *   Phase 3: CLI Client の実装。
+    *   ユーザー向けの新しいUIクライアント (ターミナル) を構築し、Hubサーバーおよび各エージェントプロセスと通信させる。
+*   **変更ファイル:** 
+    *   `src/cli.ts` (新規作成)
+    *   `package.json` (修正)
+    *   `docs/WORKLOG.md` (追記)
+*   **実行コマンド:**
+    *   `pnpm run build`
+    *   `echo exit | node dist/cli.js`
+*   **結果:**
+    *   `src/cli.ts` にて、Hubサーバー、各アダプター (Codex, Claude, Gemini) の一括起動と、`lead` エージェントとしての対話型プロンプト (readline) を実装した。
+    *   `@<agent> <message>` 形式で任意のヘッドレスエージェントにプロンプトを送信し、結果を受信するルーティングUIを構築。
+    *   `package.json` の `bin` エントリを更新してビルドパイプラインを調整した。
+*   **出力ファイルパス:**
+    *   `src/cli.ts`
+    *   `package.json`
+    *   `docs/WORKLOG.md`
+
 ## 2026/02/21 13:31:50 (JST)
 *   **目的:** 
     *   Phase 2: Gemini Adapter の実装。
