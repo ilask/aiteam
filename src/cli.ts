@@ -316,10 +316,4 @@ async function main() {
   process.on('SIGTERM', cleanup);
 }
 
-const isDirectExecution =
-  process.argv[1] !== undefined &&
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-
-if (isDirectExecution) {
-  main().catch(console.error);
-}
+main().catch(console.error);
