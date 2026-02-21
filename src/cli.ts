@@ -49,30 +49,13 @@ async function main() {
         let payload: any = match[2];
         let eventType = 'prompt';
 
-        // Translate prompt for codex into a basic RPC request if needed
-        if (target === 'codex') {
-          eventType = 'rpc';
-          try {
-            // Attempt to parse as JSON if the user wants to send raw RPC
-            payload = JSON.parse(payload);
-          } catch (e) {
-            // Fallback: send as a mock request just for demonstration
-            payload = {
-              jsonrpc: '2.0',
-              id: Date.now(),
-              method: 'turn/start',
-              params: { prompt: payload }
-            };
-          }
-        }
-        
-        ws.send(JSON.stringify({
-            from: 'lead',
-            to: target,
-            eventType,
-            payload
-        }));
-      } else if (line.trim() === 'exit' || line.trim() === 'quit') {
+                // Just send as a normal prompt to the target. Adapters should handle their own CLI specifics.
+                ws.send(JSON.stringify({
+                    from: 'lead',
+                    to: target,
+                    eventType,
+                    payload
+                }));      } else if (line.trim() === 'exit' || line.trim() === 'quit') {
         cleanup();
         return;
       } else {

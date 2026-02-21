@@ -14,9 +14,11 @@ export class CodexAdapter {
   // Track JSON-RPC state
   private isInitialized: boolean = false;
   private initMessageId: string | null = null;
+  private currentThreadId: string | null = null;
   
   // Track who requested what: RPC ID -> Originating Agent ID
   private requestMap: Map<string | number, string> = new Map();
+  private pendingPrompts: { id: string, from: string, text: string }[] = [];
 
   constructor(hubUrl: string, agentId: string = 'codex') {
     this.hubUrl = hubUrl;
@@ -103,43 +105,88 @@ export class CodexAdapter {
     });
   }
 
-  private handleHubMessage(data: string) {
-    try {
-      const msg = JSON.parse(data);
-      if (msg.eventType === 'rpc' && msg.payload) {
-        
-        // Track the request so we can route the response back
-        if (msg.payload.id !== undefined) {
-            this.requestMap.set(msg.payload.id, msg.from);
+    private handleHubMessage(data: string) {
+      try {
+        const msg = JSON.parse(data);
+        if (msg.eventType === 'rpc' && msg.payload) {
+          // Track the request so we can route the response back
+          if (msg.payload.id !== undefined) {
+              this.requestMap.set(msg.payload.id, msg.from);
+          }
+          this.sendToCodex(msg.payload);
+        } else if ((msg.eventType === 'prompt' || msg.eventType === 'delegate') && msg.payload) {
+          // The user/agent sent a plain text prompt. We need to wrap it in a JSON-RPC turn/start.
+          if (!this.currentThreadId) {
+              // Need to create a thread first.
+              const threadRequestId = randomUUID();
+              this.requestMap.set(threadRequestId, msg.from);
+              this.pendingPrompts.push({ id: threadRequestId, from: msg.from, text: msg.payload });
+              
+              this.sendToCodex({
+                  jsonrpc: "2.0",
+                  id: threadRequestId,
+                  method: "thread/start",
+                  params: {}
+              });
+          } else {
+              // Already have a thread, send turn/start
+              const turnRequestId = randomUUID();
+              this.requestMap.set(turnRequestId, msg.from);
+              this.sendToCodex({
+                  jsonrpc: "2.0",
+                  id: turnRequestId,
+                  method: "turn/start",
+                  params: {
+                      threadId: this.currentThreadId,
+                      input: [{ type: "text", text: msg.payload }]
+                  }
+              });
+          }
         }
-
-        // Only forward if initialized, unless it's a queued/early message
-        // For production, we should queue messages until isInitialized is true.
-        // For simplicity now, we forward it.
-        this.sendToCodex(msg.payload);
+      } catch (e) {
+        console.error('[CodexAdapter] Failed to parse hub message:', e);
       }
-    } catch (e) {
-      console.error('[CodexAdapter] Failed to parse hub message:', e);
     }
-  }
-
-  private handleCodexMessage(line: string) {
-    try {
-      const parsed = JSON.parse(line);
-      
-      // Handle initialize response
-      if (parsed.id === this.initMessageId && !this.isInitialized) {
-        this.isInitialized = true;
-        this.sendToCodex({
-            jsonrpc: "2.0",
-            method: "initialized",
-            params: {}
-        });
-        console.log('[CodexAdapter] Codex initialized successfully.');
-      }
-
-      // Determine routing destination
-      let targetAgent = 'lead'; // fallback
+    private handleCodexMessage(line: string) {
+      try {
+        const parsed = JSON.parse(line);
+  
+        // Handle initialize response
+        if (parsed.id === this.initMessageId && !this.isInitialized) {
+          this.isInitialized = true;
+          this.sendToCodex({
+              jsonrpc: "2.0",
+              method: "initialized",
+              params: {}
+          });
+          console.log('[CodexAdapter] Codex initialized successfully.');
+        }
+  
+        // Handle thread/start response
+        if (parsed.id !== undefined && parsed.result?.thread?.id) {
+            this.currentThreadId = parsed.result.thread.id;
+            
+            // Check if we have pending prompts that triggered this thread start
+            const pendingIndex = this.pendingPrompts.findIndex(p => p.id === parsed.id);
+            if (pendingIndex !== -1) {
+                const pending = this.pendingPrompts.splice(pendingIndex, 1)[0];
+                const turnRequestId = randomUUID();
+                this.requestMap.set(turnRequestId, pending.from);
+                this.sendToCodex({
+                    jsonrpc: "2.0",
+                    id: turnRequestId,
+                    method: "turn/start",
+                    params: {
+                        threadId: this.currentThreadId,
+                        input: [{ type: "text", text: pending.text }]
+                    }
+                });
+                // We do not route the raw thread/start response back to the user, as they just sent a plain prompt
+                return; 
+            }
+        }
+  
+        // Determine routing destination      let targetAgent = 'lead'; // fallback
       
       if (parsed.id !== undefined && this.requestMap.has(parsed.id)) {
           targetAgent = this.requestMap.get(parsed.id)!;
