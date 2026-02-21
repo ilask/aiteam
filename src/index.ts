@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { z } from 'zod';
 
 const MessageSchema = z.object({
+  id: z.string().uuid().optional(),
   from: z.string(),
   to: z.string(),
   eventType: z.string(),
@@ -27,7 +28,12 @@ export class CentralHub {
         try {
           const parsed = JSON.parse(data.toString());
           if (parsed.type === 'identify' && typeof parsed.id === 'string') {
-            agentId = parsed.id;
+            if (this.connections.has(parsed.id)) {
+                ws.send(JSON.stringify({ error: 'Agent ID already connected' }));
+                ws.close();
+                return;
+            }
+            agentId = parsed.id as string;
             this.connections.set(agentId, ws);
             console.log(`Agent connected: ${agentId}`);
             return;
@@ -45,7 +51,13 @@ export class CentralHub {
           }
 
           const message = validation.data;
-          this.routeMessage(message);
+          
+          if (message.from !== agentId) {
+            ws.send(JSON.stringify({ error: 'Spoofed identity detected', details: `You are identified as ${agentId}` }));
+            return;
+          }
+
+          this.routeMessage(message, ws);
 
         } catch (err) {
           ws.send(JSON.stringify({ error: 'Invalid JSON' }));
@@ -61,7 +73,7 @@ export class CentralHub {
     });
   }
 
-  private routeMessage(message: AgentMessage) {
+  private routeMessage(message: AgentMessage, senderWs: WebSocket) {
     console.log(`Routing from ${message.from} to ${message.to}`);
     const targetWs = this.connections.get(message.to);
     
@@ -69,7 +81,7 @@ export class CentralHub {
       targetWs.send(JSON.stringify(message));
     } else {
       console.warn(`Target ${message.to} not connected.`);
-      // Optional: buffer messages for disconnected agents
+      senderWs.send(JSON.stringify({ error: 'Delivery failed', target: message.to, reason: 'Target offline' }));
     }
   }
 

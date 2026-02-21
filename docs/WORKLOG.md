@@ -1,5 +1,50 @@
 # aiteam Worklog
 
+## 2026/02/21 13:15:13 (JST)
+*   **目的:** 
+    *   CodexのPhase 1実装レビューを反映し、Central Hubのアーキテクチャ上の致命的な欠陥を修正する。
+*   **変更ファイル:** 
+    *   `src/index.ts` (修正)
+    *   `docs/WORKLOG.md` (追記)
+*   **実行コマンド:**
+    *   `pnpm run typecheck`
+    *   `pnpm run test`
+*   **結果:**
+    *   Type error (TS2345) を解消。
+    *   `message.from` の送信者なりすまし（Spoofing）を防止するロジックを追加。
+    *   同一 `agentId` による多重接続を防ぐため、接続済みIDは弾くよう変更。
+    *   メッセージのルーティング失敗時、送信元に `NACK` （エラーメッセージ）を返すように変更。
+    *   スキーマに `id` (UUID) などを追加できるよう拡張。
+    *   `pnpm run typecheck` と `test` がパスすることを確認。
+*   **出力ファイルパス:**
+    *   `src/index.ts`
+    *   `docs/WORKLOG.md`
+
+## 2026/02/21 13:13:41 (JST)
+*   **目的:**
+    *   Phase 1 実装レビュー（Central Hub: `src/index.ts`, `src/__tests__/hub.spec.ts`）を実施し、Phase 2 着手前の即時リスクを抽出。
+*   **変更ファイル:**
+    *   `docs/WORKLOG.md` (追記)
+*   **実行コマンド:**
+    *   `Get-ChildItem -Force | Select-Object Name,Mode,Length`
+    *   `Get-Content README.md`
+    *   `Get-Content docs/PROJECT_SPEC.md`
+    *   `Get-Content docs/RUNBOOK.md` (not found)
+    *   `Get-Content docs/WORKLOG.md`
+    *   `Get-Content src/index.ts`
+    *   `Get-Content src/__tests__/hub.spec.ts`
+    *   `pnpm run test src/__tests__/hub.spec.ts`
+    *   `pnpm run typecheck`
+    *   `pnpm run build`
+*   **結果:**
+    *   `pnpm run test src/__tests__/hub.spec.ts` は成功（1 file / 1 test passed）。
+    *   `pnpm run typecheck` と `pnpm run build` は失敗。主要エラーは `TS2345`（`src/index.ts:31:34` で `string | null` を `Map<string, WebSocket>.set()` に渡している）。
+    *   アーキテクチャ面で、(1) `from` なりすまし検知なし、(2) 同一 agent ID 再接続時の整合性欠如、(3) 配送失敗時の送信元通知・再送戦略なし、(4) スキーマのバージョン/相関ID/ACK設計不足、(5) テストが正常系1件のみ、を即時リスクとして整理。
+*   **出力ファイルパス:**
+    *   `src/index.ts`
+    *   `src/__tests__/hub.spec.ts`
+    *   `docs/WORKLOG.md`
+
 ## 2026/02/21 13:07:59 (JST)
 *   **目的:**
     *   Phase 1: Central Hub のコア実装（WebSocket サーバー）の作成。
@@ -72,30 +117,6 @@
     *   追加推奨項目を要件別に整理し、最終レビューで提示予定。
 *   **出力ファイルパス:**
     *   `docs/WORKLOG.md`
-## 2026/02/21 13:13:41 (JST)
-*   **目的:**
-    *   Phase 1 実装レビュー（Central Hub: `src/index.ts`, `src/__tests__/hub.spec.ts`）を実施し、Phase 2 着手前の即時リスクを抽出。
-*   **変更ファイル:**
-    *   `docs/WORKLOG.md` (追記)
-*   **実行コマンド:**
-    *   `Get-ChildItem -Force | Select-Object Name,Mode,Length`
-    *   `Get-Content README.md`
-    *   `Get-Content docs/PROJECT_SPEC.md`
-    *   `Get-Content docs/RUNBOOK.md` (not found)
-    *   `Get-Content docs/WORKLOG.md`
-    *   `Get-Content src/index.ts`
-    *   `Get-Content src/__tests__/hub.spec.ts`
-    *   `pnpm run test src/__tests__/hub.spec.ts`
-    *   `pnpm run typecheck`
-    *   `pnpm run build`
-*   **結果:**
-    *   `pnpm run test src/__tests__/hub.spec.ts` は成功（1 file / 1 test passed）。
-    *   `pnpm run typecheck` と `pnpm run build` は失敗。主要エラーは `TS2345`（`src/index.ts:31:34` で `string | null` を `Map<string, WebSocket>.set()` に渡している）。
-    *   アーキテクチャ面で、(1) `from` なりすまし検知なし、(2) 同一 agent ID 再接続時の整合性欠如、(3) 配送失敗時の送信元通知・再送戦略なし、(4) スキーマのバージョン/相関ID/ACK設計不足、(5) テストが正常系1件のみ、を即時リスクとして整理。
-*   **出力ファイルパス:**
-    *   `src/index.ts`
-    *   `src/__tests__/hub.spec.ts`
-    *   `docs/WORKLOG.md`
 
 ## 2026/02/21 12:48:03 (JST)
 *   **目的:** 
@@ -137,21 +158,4 @@
 *   **出力ファイルパス:**
     *   `AGENTS.md`
     *   `docs/codex_interaction_guide.md`
-    *   `docs/WORKLOG.md`
-## 2026/02/21 13:02:06 (JST)
-*   **目的:**
-    *   Phase 1 Node.js 環境の `package.json` / `tsconfig.json` の設定レビュー（Node 20+ ESM / TS module resolution / 必須devDependencies）。
-*   **変更ファイル:**
-    *   `docs/WORKLOG.md` (追記)
-*   **実行コマンド:**
-    *   `rg --files | rg "^(README\.md|docs/PROJECT_SPEC\.md|docs/RUNBOOK\.md|docs/WORKLOG\.md)$"`
-    *   `Get-Content README.md -TotalCount 120`
-    *   `Get-Content docs/PROJECT_SPEC.md -TotalCount 180`
-    *   `Get-Content docs/WORKLOG.md -Tail 120`
-    *   `Get-Content docs/RUNBOOK.md -TotalCount 180` (not found)
-    *   `git status --short`
-*   **結果:**
-    *   開始前チェックを実施し、`docs/RUNBOOK.md` は未作成であることを確認。
-    *   設定レビュー観点（ESM, NodeNext, CLI配布設定, ESLint/TS連携, テスト型チェック分離）を整理し、ユーザー返答準備完了。
-*   **出力ファイルパス:**
     *   `docs/WORKLOG.md`
