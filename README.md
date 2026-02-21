@@ -35,11 +35,24 @@ cd tmux-ai-team-tool-repo
 pnpm run build
 ```
 
-### Run the Hub & CLI
+### Global Installation (Recommended)
+
+To run `aiteam` from anywhere on your system:
 
 ```bash
-pnpm run start
-# or directly:
+# Link globally via pnpm (or use: npm install -g .)
+pnpm link --global
+```
+
+Now you can start the Hub from any directory:
+
+```bash
+aiteam
+```
+
+### Run Locally (Without Global Install)
+
+```bash
 node dist/cli.js
 ```
 
