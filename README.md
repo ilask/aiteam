@@ -1,61 +1,59 @@
-# tmux-ai-team-tool
+# aiteam (v2)
 
-A tiny CLI that makes **tmux-based “agent collaboration”** easier — especially on **WSL**.
+A tiny Node.js CLI that orchestrates **Agent Teams** (Codex, Claude Code, Gemini CLI) autonomously in a headless, tightly-coupled architecture.
+
+**Note:** This is aiteam v2. We have migrated away from the legacy Python/tmux screen-scraping architecture to a robust Node.js WebSocket Hub with `stdio` JSON-RPC IPC.
 
 It’s designed for workflows like:
 
-- Pane A: **one main agent** (Claude Code, Cursor CLI, Gemini CLI, *or* Codex CLI)
-- Pane B/C/D...: multiple **Codex CLI** panes (implement / test / refactor / error-analysis)
+- **Lead Agent** (Human or Mock UI) coordinates the team.
+- **Claude Adapter** (`claude` headless stream mode) for architectural review and refactoring.
+- **Gemini Adapter** (`gemini` headless stream mode) for log analysis and task implementation.
+- **Codex Adapter** (`codex app-server` JSON-RPC mode) for test execution and OS operations.
 
-…and it reduces the annoying parts (session setup, pane naming, sending prompts, capturing output, quick handoffs, and optional push/relay).
+…and it allows agents to autonomously `@agent_name` route messages to each other without human intervention.
 
-## Requirements (WSL-friendly)
+## Requirements (Cross-Platform)
 
-- **tmux** installed and available in `PATH`
-- Python **3.9+**
-- Any “agent CLI” commands you want to run (examples: `claude`, `agent` (Cursor CLI), `gemini`, `codex`)
+- Node.js **v20+**
+- `pnpm` (via corepack)
+- Any “agent CLI” commands you want to run (examples: `claude`, `gemini`, `codex`)
 
-On WSL/Ubuntu:
-
-```bash
-sudo apt update
-sudo apt install -y tmux python3 python3-pip
-```
-
-## Install
-
-### Option A: editable install (recommended)
+On Windows/macOS/Linux:
 
 ```bash
-cd tmux-ai-team-tool
-python3 -m pip install -e .
+corepack enable
+pnpm install
 ```
 
-You’ll get the `aiteam` command.
+## Install & Run
 
-### Option B: run without installing
+### Development Build
 
 ```bash
-./aiteam --help
-
-(or: `PYTHONPATH=src python3 -m tmux_ai_team --help`)
+cd tmux-ai-team-tool-repo
+pnpm run build
 ```
 
-## Quickstart (WSL)
+### Run the Hub & CLI
 
-### 0) Start a session with **one main agent** (Claude, Cursor, Gemini, or Codex)
+```bash
+pnpm run start
+# or directly:
+node dist/cli.js
+```
 
-If you omit `--session`, `aiteam` auto-generates one:
+## Quickstart (Headless Agent Teams)
 
-- inside a Git repo: preferred remote repo name
-  - priority: `origin` -> `origin*` (lexicographic) -> other remotes (lexicographic) -> local top-level directory name
-- if that name already exists: adds `-2`, `-3`, ...
-- outside Git: falls back to `ai-team`
+Start the Central Hub. It will automatically spawn the Codex, Claude, and Gemini adapters in the background and present an interactive prompt.
+
+```bash
+node dist/cli.js
+```
 
 ### Codex Profile (Recommended)
 
-`aiteam` starts Codex with profile `aiteam` by default (`codex -p aiteam`).
-Set it once in `~/.codex/config.toml`:
+`aiteam` starts Codex via `codex app-server`. Make sure your `~/.codex/config.toml` has necessary capabilities enabled.
 
 ```toml
 [profiles.aiteam]
@@ -66,182 +64,30 @@ approval_policy = "never"
 sandbox_mode = "danger-full-access"
 ```
 
-### Session Briefing (AGENTS.md-Style, Ephemeral)
+### Inter-Agent Routing
 
-If you want a *session-only* briefing pasted into each new pane (including the main agent and Codex panes), use `--briefing` on `start`/`spawn`.
-It opens your editor (`$AITEAM_EDITOR` or `$EDITOR`) and the file is deleted automatically when the tmux session closes.
-
-Claude Code as main:
-
-```bash
-aiteam start --cwd /path/to/project --main claude --attach
-```
-
-Cursor CLI as main (command is `agent`):
-
-```bash
-aiteam start --cwd /path/to/project --main cursor --attach
-
-# or:
-aiteam start --cwd /path/to/project --main custom --title cursor --exec "agent" --attach
-```
-
-Gemini CLI as main:
-
-```bash
-aiteam start --cwd /path/to/project --main gemini --attach
-```
-
-Codex as main:
-
-```bash
-aiteam start --cwd /path/to/project --main codex --attach
-```
-
-### 1) From inside the main pane, spawn Codex panes (multiple OK)
-
-```bash
-# Returns the selector on stdout, e.g. "codex:1"
-CODEX_MAIN="$(aiteam codex --name main)"
-
-CODEX_TESTS="$(aiteam codex --name tests)"
-CODEX_REFACTOR="$(aiteam codex --name refactor)"
-```
-
-Each Codex pane title looks like:
-
-`codex#<id>:<name>`
-
-You can target a specific Codex later via:
-
-`codex:<id>`
-
-For Codex panes, label-only selectors also work when unique (example: `main`, `tests`, `analyst1`).
-
-Example:
-
-```bash
-aiteam send --session myproj --to codex:2 --body "Run tests and summarize failures."
-```
-
-Useful options:
-
-```bash
-aiteam codex --layout horizontal   # split top/bottom
-aiteam codex --focus new           # leave focus in the new Codex pane
-aiteam codex --id 10 --name perf   # choose a specific id
-aiteam codex --policy skip         # if that id already exists, do nothing
-aiteam codex --omit-selector       # do NOT print selector to stdout
-aiteam codex --json                # print JSON (id/name/selector/session)
-```
-
-### 2) Handoff without copy/paste
-
-```bash
-aiteam handoff --session myproj --from claude --to codex:1 --lines 120 --caption "Plan from main:"
-```
-
-(Replace `--from claude` with your pane title, e.g. `--from cursor` or `--from codex`.)
-
-### 3) Agent-to-agent push (optional)
-
-Run a relay that watches the main pane and pushes marker blocks to a Codex pane:
-
-```bash
-aiteam relay --session myproj --from cursor --to codex:1 --caption "From main:" --verbose
-
-# Also relay blocks already visible when relay starts:
-aiteam relay --session myproj --from cursor --to codex:1 --already-visible --once
-```
-
-Tell the source agent to output:
+The core of v2 is the **Inter-Agent Router**. You can delegate a task directly:
 
 ```text
-[PUSH]
-Implement the plan above. Run tests. Summarize the diff.
-[/PUSH]
+You> @codex Run the test suite and summarize failures.
 ```
 
-Anything between `[PUSH]` and `[/PUSH]` gets pasted into the destination pane.
+Or, an agent can autonomously delegate. If Claude decides to run a command, it will output:
+`@codex echo 'HELO'`
+The Hub intercepts this and routes it natively.
 
-### 4) Capture Codex output
+## Testing (Vitest)
+
+We use Vitest for unit tests (Hub/Adapters) and full E2E Workflow tests.
 
 ```bash
-aiteam capture --session myproj --from codex:1 --lines 200
+# Run all tests
+pnpm run test
+
+# Run E2E tests only
+pnpm run test src/__tests__/e2e/
 ```
 
-### 5) Kill the session
+## E2E Dataset (Agent Teams Evaluation)
 
-```bash
-aiteam kill --session myproj
-```
-
-### 6) Run built-in plumbing selftest
-
-```bash
-aiteam selftest
-```
-
-It creates a temporary tmux session with two panes, relays a `[PUSH]pong[/PUSH]` block, and verifies delivery.
-
-## Real-CLI E2E Test (codex / claude / agent, headless)
-
-The repository includes real end-to-end pytest cases that launch `codex`, `claude`, and `agent` in tmux panes without mocks:
-
-`tests/test_e2e_real_agents.py`
-
-The suite covers:
-- `spawn` + `list` + `capture` + `kill` with real binaries
-- a workflow path: `start` -> `add` -> `codex` -> `send` -> `relay` -> `handoff` -> `kill`
-
-It is opt-in to keep normal test runs fast/stable. Enable it with:
-
-```bash
-AITEAM_RUN_REAL_E2E=1 pytest -q tests/test_e2e_real_agents.py
-```
-
-Optional command overrides (if your headless flags differ):
-
-```bash
-AITEAM_E2E_CODEX_CMD="codex --help"
-AITEAM_E2E_CLAUDE_CMD="claude --help"
-AITEAM_E2E_AGENT_CMD="agent --help"
-```
-
-## Commands
-
-Every long option has a strict short alias based on its initial letter (no collisions allowed per subcommand). Check each command's `--help`.
-
-- `start`  : create a tmux session and start a single main agent pane (Claude/Cursor/Gemini/Codex)
-- `spawn`  : create a tmux session, split panes, and start agent commands
-- `add`    : add a new agent pane to an existing session
-- `codex`  : start a new Codex instance pane (multiple supported; id+name)
-- `attach` : attach to the tmux session
-- `send`   : paste text into a pane (supports multiline)
-- `capture`: capture the last N lines from a pane
-- `handoff`: capture from one pane and paste into another (no copy/paste)
-- `relay`  : watch a pane for marker blocks/regex matches and push them into another pane
-- `list`   : list tmux sessions (filtered)
-- `kill`   : kill a tmux session
-- `doctor` : sanity checks (tmux presence, version, etc.)
-- `selftest`: smoke-test send/capture/relay plumbing in a temporary tmux session
-
-`aiteam -h` always shows:
-- basic quick commands for the main agent
-- absolute path to `README.md`
-
-When run inside a tmux pane titled as an aiteam agent (`codex#...`, `codex`, `claude`, `agent`, `cursor`, `gemini`),
-help output also shows a short status line indicating the detected agent context.
-
-## Auto error-analyzer Codex
-
-Auto error-analyzer Codex is now **disabled by default**.
-
-When enabled, if an `aiteam` command fails with a tmux/control error (exit code 1) **and you're inside tmux**,
-`aiteam` will *best-effort* start a dedicated Codex pane titled like:
-
-`codex#err1:error`
-
-…and paste a structured prompt containing the error + environment details.
-Enable with `--error-codex` or `AITEAM_ENABLE_ERROR_CODEX=1`.
-Disable explicitly with `--no-error-codex` or `AITEAM_DISABLE_ERROR_CODEX=1`.
+The repository includes a git submodule pointing to `weseek/growi` to evaluate complex Agent Teams collaboration (e.g. semantic search implementation). See `e2e-dataset/growi-semantic-search-task/TASK_SPEC.md` for details.
