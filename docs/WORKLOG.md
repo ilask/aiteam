@@ -72,6 +72,30 @@
     *   追加推奨項目を要件別に整理し、最終レビューで提示予定。
 *   **出力ファイルパス:**
     *   `docs/WORKLOG.md`
+## 2026/02/21 13:13:41 (JST)
+*   **目的:**
+    *   Phase 1 実装レビュー（Central Hub: `src/index.ts`, `src/__tests__/hub.spec.ts`）を実施し、Phase 2 着手前の即時リスクを抽出。
+*   **変更ファイル:**
+    *   `docs/WORKLOG.md` (追記)
+*   **実行コマンド:**
+    *   `Get-ChildItem -Force | Select-Object Name,Mode,Length`
+    *   `Get-Content README.md`
+    *   `Get-Content docs/PROJECT_SPEC.md`
+    *   `Get-Content docs/RUNBOOK.md` (not found)
+    *   `Get-Content docs/WORKLOG.md`
+    *   `Get-Content src/index.ts`
+    *   `Get-Content src/__tests__/hub.spec.ts`
+    *   `pnpm run test src/__tests__/hub.spec.ts`
+    *   `pnpm run typecheck`
+    *   `pnpm run build`
+*   **結果:**
+    *   `pnpm run test src/__tests__/hub.spec.ts` は成功（1 file / 1 test passed）。
+    *   `pnpm run typecheck` と `pnpm run build` は失敗。主要エラーは `TS2345`（`src/index.ts:31:34` で `string | null` を `Map<string, WebSocket>.set()` に渡している）。
+    *   アーキテクチャ面で、(1) `from` なりすまし検知なし、(2) 同一 agent ID 再接続時の整合性欠如、(3) 配送失敗時の送信元通知・再送戦略なし、(4) スキーマのバージョン/相関ID/ACK設計不足、(5) テストが正常系1件のみ、を即時リスクとして整理。
+*   **出力ファイルパス:**
+    *   `src/index.ts`
+    *   `src/__tests__/hub.spec.ts`
+    *   `docs/WORKLOG.md`
 
 ## 2026/02/21 12:48:03 (JST)
 *   **目的:** 
