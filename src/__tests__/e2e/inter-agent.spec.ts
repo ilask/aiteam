@@ -37,14 +37,9 @@ describe('E2E: Inter-Agent Router (Agent Teams)', () => {
         id: randomUUID(),
         from: 'mockAgent',
         to: 'codex', // Hub will route this to Codex
-        eventType: 'rpc', // Codex expects 'rpc' currently from hub
-        returnTo: 'mockAgent', // Instruct Codex to send the response back to mockAgent (needs adapter support, but hub routes based on 'to')
-        payload: {
-            jsonrpc: "2.0",
-            id: "test-echo-1",
-            method: "turn/start",
-            params: { prompt: "echo HELO" }
-        }
+        eventType: 'delegate', 
+        returnTo: 'mockAgent', // Instruct Codex to send the response back to mockAgent
+        payload: "echo HELO" // Just send plain text, CodexAdapter will wrap it in thread/start -> turn/start
     };
 
     const codexResponse = new Promise<any>((resolve, reject) => {
@@ -52,9 +47,14 @@ describe('E2E: Inter-Agent Router (Agent Teams)', () => {
         mockAgentWs.on('message', (data) => {
             const msg = JSON.parse(data.toString());
             // mockAgent receives a response from codex
-            if (msg.from === 'codex') {
-                clearTimeout(timeout);
-                resolve(msg);
+            if (msg.from === 'codex' && msg.to === 'mockAgent') {
+                if (msg.payload && msg.payload.error) {
+                    clearTimeout(timeout);
+                    reject(new Error('Codex returned an error: ' + JSON.stringify(msg.payload.error)));
+                } else if (msg.payload && (msg.payload.method === 'turn/started' || (msg.payload.result && msg.payload.result.turn))) {
+                    clearTimeout(timeout);
+                    resolve(msg);
+                }
             }
         });
     });
@@ -66,7 +66,7 @@ describe('E2E: Inter-Agent Router (Agent Teams)', () => {
     // Assert that the mock agent received a reply directly from codex
     expect(response.from).toBe('codex');
     expect(response.to).toBe('mockAgent'); // Codex Adapter uses requestMap to send it back to 'mockAgent'
-    expect(response.eventType).toBe('rpc_response');
+    expect(['rpc_response', 'rpc_notification']).toContain(response.eventType);
 
     mockAgentWs.close();
   }, 20000);
