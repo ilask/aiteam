@@ -1,5 +1,23 @@
 # aiteam Worklog
 
+## 2026/02/21 13:07:59 (JST)
+*   **目的:**
+    *   Phase 1: Central Hub のコア実装（WebSocket サーバー）の作成。
+    *   Vitest を用いたユニットテストの作成と実行。
+*   **変更ファイル:**
+    *   `src/index.ts` (新規作成)
+    *   `src/__tests__/hub.spec.ts` (新規作成)
+    *   `docs/WORKLOG.md` (追記)
+*   **実行コマンド:**
+    *   `pnpm run test src/__tests__/hub.spec.ts`
+*   **結果:**
+    *   Zod による型安全なメッセージパースと、接続中のエージェント間でのメッセージルーティング機能を持つ WebSocket サーバーを実装。
+    *   単体テストが正常に通過することを確認。
+*   **出力ファイルパス:**
+    *   `src/index.ts`
+    *   `src/__tests__/hub.spec.ts`
+    *   `docs/WORKLOG.md`
+
 ## 2026/02/21 13:06:08 (JST)
 *   **目的:**
     *   `AGENTS.md` に自律的なコミットルールを追加。
