@@ -1,5 +1,26 @@
 # aiteam Worklog
 
+## 2026/02/21 13:31:50 (JST)
+*   **目的:** 
+    *   Phase 2: Gemini Adapter の実装。
+    *   Gemini CLIをヘッドレス・ストリームモード (`gemini -o stream-json`) で起動し、Hubと連携させる。
+*   **変更ファイル:** 
+    *   `src/adapters/gemini.ts` (新規作成)
+    *   `src/__tests__/adapters/gemini.spec.ts` (新規作成)
+    *   `docs/WORKLOG.md` (追記)
+    *   `test-gemini-stdio.ts` (新規作成・検証用)
+*   **実行コマンド:**
+    *   `npx tsx test-gemini-stdio.ts`
+    *   `pnpm run test src/__tests__/adapters/gemini.spec.ts`
+*   **結果:**
+    *   `gemini -o stream-json` として起動し、標準入力からプレーンテキストのプロンプトを受け取り、標準出力にJSONをストリーミングする仕様を確認した（APIキー必須）。
+    *   Hub経由で受け取ったプロンプトをGeminiに渡し、出力をパースして要求元にルーティングするAdapterを実装。
+    *   Vitestによる接続テストが成功することを確認した。
+*   **出力ファイルパス:**
+    *   `src/adapters/gemini.ts`
+    *   `src/__tests__/adapters/gemini.spec.ts`
+    *   `docs/WORKLOG.md`
+
 ## 2026/02/21 13:29:48 (JST)
 *   **目的:** 
     *   Phase 2: Claude Adapter の実装。
