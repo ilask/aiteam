@@ -1,0 +1,13 @@
+We are considering rewriting a CLI tool called "aiteam" that coordinates multiple AI agents (like Codex, Claude Code, and Gemini CLI) to work together.
+
+Currently, "aiteam" works by wrapping everything in tmux sessions and scraping pane output using `tmux capture-pane`, and pasting text using `tmux send-keys`. This is hacky and doesn't work well natively on Windows.
+
+We want to move to a Node.js (TypeScript) architecture:
+1. A Central Hub Server (Node.js) acting as a WebSocket server.
+2. Agent Adapters:
+   - Codex adapter: Uses `codex app-server --listen ws://127.0.0.1:4500` to communicate via JSON-RPC.
+   - Claude adapter: Spawns `claude --print --input-format=stream-json --output-format=stream-json` as a child process and translates its stdio into the Hub's WebSocket protocol.
+   - Gemini adapter: Similar to Claude, spawning `gemini` and wrapping its stdio.
+3. CLI/Web Clients: Users connect to the Hub via WebSockets to see the coordinated output of all agents without relying on terminal panes.
+
+As an expert AI coding assistant, what do you think of this architecture? Are there any potential pitfalls, especially regarding the `codex app-server` JSON-RPC implementation, or managing stdio streams of other CLIs? Does this seem like a viable and robust path forward?
