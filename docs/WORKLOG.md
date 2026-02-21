@@ -1,5 +1,23 @@
 # aiteam Worklog
 
+## 2026/02/21 13:38:47 (JST)
+*   **目的:** 
+    *   CodexのPhase 3実装レビューを反映し、CLIエントリーポイントの脆弱性（`ERR_USE_AFTER_CLOSE`、不正なシャットダウン、プロトコル不一致）を修正する。
+*   **変更ファイル:** 
+    *   `src/cli.ts` (全面修正)
+    *   `docs/WORKLOG.md` (追記)
+*   **実行コマンド:**
+    *   `pnpm run build`
+    *   `echo exit | node dist/cli.js`
+*   **結果:**
+    *   `isShuttingDown` フラグを導入し、EOFやシグナル時のシャットダウンプロセスを冪等（idempotent）に修正。
+    *   パイプからの入力で `process.stdin` が閉じた際、`readline` が `ERR_USE_AFTER_CLOSE` でクラッシュする問題を `rl.on('close')` のハンドリングによって解決。
+    *   WebSocketのエラーおよびクローズイベントのハンドリングを追加し、Hub死活監視を強化。
+    *   Codex向けのコマンドを単なる `prompt` 文字列から、JSON-RPC 形式 (`turn/start`) に変換して送信するようプロトコル差異を吸収。
+*   **出力ファイルパス:**
+    *   `src/cli.ts`
+    *   `docs/WORKLOG.md`
+
 ## 2026/02/21 13:33:26 (JST)
 *   **目的:** 
     *   Phase 3: CLI Client の実装。

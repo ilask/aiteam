@@ -11,10 +11,14 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4501;
 async function main() {
   console.log('Starting aiteam v2 (Headless Architecture)...');
   
-  // 1. Start Hub
-  const hub = new CentralHub(PORT);
+  let hub: CentralHub;
+  try {
+    hub = new CentralHub(PORT);
+  } catch (err) {
+    console.error('Failed to start Hub server:', err);
+    process.exit(1);
+  }
   
-  // 2. Start Adapters
   const hubUrl = `ws://localhost:${PORT}`;
   const codex = new CodexAdapter(hubUrl, 'codex');
   const claude = new ClaudeAdapter(hubUrl, 'claude');
@@ -26,34 +30,47 @@ async function main() {
     gemini.start().catch(e => console.error('Gemini failed to start', e))
   ]);
 
-  // 3. Start CLI Client (Lead Agent)
   const ws = new WebSocket(hubUrl);
   
-  ws.on('open', () => {
-    ws.send(JSON.stringify({ type: 'identify', id: 'lead' }));
-    console.log("\\n--- aiteam CLI ---");
-    console.log('Available agents: codex, claude, gemini');
-    console.log('Type "@agent_name message" to send a prompt. Example: @claude hello');
-    promptUser();
-  });
-
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
   });
 
+  let isShuttingDown = false;
+
   function promptUser() {
+    if (isShuttingDown) return;
     rl.question('You> ', (line) => {
+      if (isShuttingDown) return;
       const match = line.match(/^@(\w+)\s+(.*)$/);
       if (match) {
         const target = match[1];
-        const payload = match[2];
+        let payload: any = match[2];
+        let eventType = 'prompt';
+
+        // Translate prompt for codex into a basic RPC request if needed
+        if (target === 'codex') {
+          eventType = 'rpc';
+          try {
+            // Attempt to parse as JSON if the user wants to send raw RPC
+            payload = JSON.parse(payload);
+          } catch (e) {
+            // Fallback: send as a mock request just for demonstration
+            payload = {
+              jsonrpc: '2.0',
+              id: Date.now(),
+              method: 'turn/start',
+              params: { prompt: payload }
+            };
+          }
+        }
         
         ws.send(JSON.stringify({
             from: 'lead',
             to: target,
-            eventType: 'prompt',
-            payload: payload
+            eventType,
+            payload
         }));
       } else if (line.trim() === 'exit' || line.trim() === 'quit') {
         cleanup();
@@ -61,17 +78,35 @@ async function main() {
       } else {
         console.log('Invalid format. Use "@agent message".');
       }
+      // Re-prompt immediately (in a real async flow we'd wait for response, but for now we just loop)
       promptUser();
     });
   }
 
+  ws.on('open', () => {
+    ws.send(JSON.stringify({ type: 'identify', id: 'lead' }));
+    console.log('\n--- aiteam CLI ---');
+    console.log('Available agents: codex, claude, gemini');
+    console.log('Type "@agent_name message" to send a prompt. Example: @claude hello');
+    promptUser();
+  });
+
+  ws.on('error', (err) => {
+    if (!isShuttingDown) console.error('\n[Lead WS Error]', err);
+  });
+
+  ws.on('close', () => {
+    if (!isShuttingDown) {
+        console.log('\n[Lead WS Closed] Connection to Hub lost.');
+        cleanup();
+    }
+  });
+
   ws.on('message', (data) => {
     try {
         const msg = JSON.parse(data.toString());
-        // Simple formatting for the UI
         let output = '';
         if (msg.payload && typeof msg.payload === 'object') {
-            // Try to extract readable text
             if (msg.payload.message && msg.payload.message.content) {
                 const content = msg.payload.message.content;
                 output = Array.isArray(content) ? content.map((c:any) => c.text).join('') : content;
@@ -86,25 +121,30 @@ async function main() {
 
         readline.clearLine(process.stdout, 0);
         readline.cursorTo(process.stdout, 0);
-        console.log(`\\n[${msg.from}] ${output}`);
+        console.log(`\n[${msg.from}] ${output}`);
         rl.prompt(true);
     } catch (e) {
-        console.log(`\\n[Raw] ${data.toString()}`);
+        readline.clearLine(process.stdout, 0);
+        readline.cursorTo(process.stdout, 0);
+        console.log(`\n[Raw] ${data.toString()}`);
         rl.prompt(true);
     }
   });
 
   function cleanup() {
-    console.log('\\nShutting down...');
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log('\nShutting down...');
     rl.close();
     ws.close();
     codex.stop();
     claude.stop();
     gemini.stop();
     hub.stop();
-    process.exit(0);
+    setTimeout(() => process.exit(0), 100);
   }
 
+  rl.on('close', cleanup);
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 }
