@@ -1,5 +1,31 @@
 # aiteam Worklog
 
+## 2026/02/21 15:20:19 (JST)
+*   **目的:** 
+    *   E2E Test Task Specification（GROWI + ruri v3 意味検索）に対する、Phase 5 Inter-Agent Router 観点のレビュー実施。
+    *   Gemini -> Claude -> Codex の自律連携シナリオにおけるコンテキスト保持、システムプロンプト注入、旧tmuxモデルとの差分検証性を評価。
+*   **変更ファイル:** 
+    *   `docs/WORKLOG.md` (追記)
+*   **実行コマンド:**
+    *   `rg --files`
+    *   `git status --short`
+    *   `Get-Content README.md`
+    *   `Get-Content docs/PROJECT_SPEC.md`
+    *   `Get-Content docs/RUNBOOK.md` (not found)
+    *   `Get-Content docs/WORKLOG.md -Tail 220`
+    *   `Get-Content src/index.ts`
+    *   `Get-Content src/cli.ts`
+    *   `Get-Content src/adapters/{codex,claude,gemini}.ts`
+    *   `Get-Content src/__tests__/{adapters/*,e2e/*}.ts`
+    *   `rg -n` による `@agent` ルーティング・`requestMap`・`returnTo` の確認
+    *   `Get-Content e2e-dataset/growi-semantic-search-task/growi-submodule/{AGENTS.md,README.md}`
+*   **結果:**
+    *   `@agent` 検出が先頭1行の正規表現依存であり、複数行メッセージ・コードブロック・誤検出時に文脈欠落/誤ルーティングが起きるリスクを確認。
+    *   `requestMap` の先頭要素返却（first-entry fallback）に依存しており、並行タスク時に返信先の取り違えが起きるリスクを確認。
+    *   既存E2Eは「単発の委譲成立」を示すが、「密結合アーキテクチャが旧tmuxより優位」であることを示す比較証拠（順序保証、再送、構造化相関ID、障害復旧、A/B比較指標）は未充足と評価。
+*   **出力ファイルパス:**
+    *   `docs/WORKLOG.md`
+
 ## 2026/02/21 15:16:41 (JST)
 *   **目的:** 
     *   Agent Teamsの協調動作を実証・評価するためのE2Eデータセット（GROWIへのRuri v3意味検索組み込みタスク）の準備。
