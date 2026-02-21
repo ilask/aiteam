@@ -43,7 +43,7 @@ async function main() {
     if (isShuttingDown) return;
     rl.question('You> ', (line) => {
       if (isShuttingDown) return;
-      const match = line.match(/^@(\w+)\s+(.*)$/);
+      const match = line.match(/^@(\w+)\s+([\s\S]*)$/);
       if (match) {
         const target = match[1];
         let payload: any = match[2];

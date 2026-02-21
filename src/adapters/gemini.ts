@@ -129,7 +129,7 @@ export class GeminiAdapter {
       let payload = parsed;
 
       // Check if this is an explicit delegation
-      const match = textContent.match(/^@(\w+)\s+(.*)$/);
+      const match = textContent.match(/^@(\w+)\s+([\s\S]*)$/);
       if (match) {
           to = match[1];
           eventType = 'delegate';
