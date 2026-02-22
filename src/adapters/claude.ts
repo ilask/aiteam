@@ -3,6 +3,43 @@ import * as readline from 'readline';
 import { WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
 
+const AUTONOMOUS_MODE_DISABLED_VALUES = new Set(['0', 'false', 'off', 'no']);
+const ENABLED_VALUES = new Set(['1', 'true', 'on', 'yes']);
+
+function isAutonomousModeEnabled(rawValue: string | undefined): boolean {
+  if (!rawValue) return true;
+  return !AUTONOMOUS_MODE_DISABLED_VALUES.has(rawValue.trim().toLowerCase());
+}
+
+function isTextOnlyModeEnabled(rawValue: string | undefined): boolean {
+  if (!rawValue) return false;
+  return ENABLED_VALUES.has(rawValue.trim().toLowerCase());
+}
+
+function buildAutonomousPrompt(agentId: string, originalPrompt: string): string {
+  return [
+    `[aiteam autonomy mode: ${agentId}]`,
+    'Prefer agent-to-agent collaboration before replying to lead.',
+    'Delegate tasks with exactly one line: @<agent> <task>.',
+    'Send progress updates only when blocked; otherwise send final synthesized result.',
+    '',
+    'Task:',
+    originalPrompt
+  ].join('\n');
+}
+
+function buildTextOnlyPrompt(agentId: string, originalPrompt: string): string {
+  return [
+    `[aiteam claude text-only mode: ${agentId}]`,
+    'Reply in plain text only.',
+    'Do NOT use tools (Read, Write, Edit, MultiEdit, Bash, Glob, Grep).',
+    'Do NOT access files or convert paths.',
+    '',
+    'Task:',
+    originalPrompt
+  ].join('\n');
+}
+
 export class ClaudeAdapter {
   private claudeProcess: ChildProcess | null = null;
   private hubWs: WebSocket | null = null;
@@ -10,6 +47,8 @@ export class ClaudeAdapter {
   private agentId: string;
   private hubUrl: string;
   private isStopping: boolean = false;
+  private autonomousModeEnabled: boolean;
+  private textOnlyModeEnabled: boolean;
   
   // Track requests for routing responses back
   // Map of messageId -> originating agent
@@ -18,6 +57,12 @@ export class ClaudeAdapter {
   constructor(hubUrl: string, agentId: string = 'claude') {
     this.hubUrl = hubUrl;
     this.agentId = agentId;
+    this.autonomousModeEnabled = isAutonomousModeEnabled(
+      process.env.AITEAM_AUTONOMOUS_MODE
+    );
+    this.textOnlyModeEnabled = isTextOnlyModeEnabled(
+      process.env.AITEAM_CLAUDE_TEXT_ONLY
+    );
   }
 
   public async start() {
@@ -53,18 +98,22 @@ export class ClaudeAdapter {
   }
 
   private startClaudeProcess() {
+    if (this.claudeProcess && this.claudeProcess.stdin && !this.claudeProcess.stdin.destroyed) {
+      return;
+    }
+
     // console.debug('[ClaudeAdapter] Starting claude process (stdio streaming)');
     
     const cmd = 'claude';
     
     this.claudeProcess = spawn(cmd, ['--print', '--verbose', '--input-format=stream-json', '--output-format=stream-json'], {
-      stdio: ['pipe', 'pipe', 'inherit'],
+      stdio: ['pipe', 'pipe', 'ignore'],
       shell: process.platform === 'win32' // Required for some windows environments to find global npm binaries
     });
 
     this.claudeProcess.on('error', (err) => {
       console.error('[ClaudeAdapter] Failed to spawn Claude:', err);
-      this.stop();
+      this.detachClaudeIo();
     });
 
     if (!this.claudeProcess.stdout || !this.claudeProcess.stdin) {
@@ -86,12 +135,32 @@ export class ClaudeAdapter {
 
     this.claudeProcess.on('exit', (code) => {
       // console.debug(`[ClaudeAdapter] Claude process exited with code ${code}`);
+      this.detachClaudeIo();
       if (!this.isStopping) {
-        // Claude --print might exit after one interaction. We might need to handle respawning here for a long-lived agent.
-        // For Phase 2, we just let it stop.
+        // Keep adapter connected to Hub. The process is spawned lazily on the next prompt.
       }
-      this.stop();
     });
+  }
+
+  private ensureClaudeProcess() {
+    if (this.isStopping) {
+      return;
+    }
+    const hasActiveStdin =
+      this.claudeProcess !== null &&
+      this.claudeProcess.stdin !== null &&
+      !this.claudeProcess.stdin.destroyed;
+    if (!hasActiveStdin) {
+      this.startClaudeProcess();
+    }
+  }
+
+  private detachClaudeIo() {
+    if (this.rl) {
+      this.rl.close();
+      this.rl = null;
+    }
+    this.claudeProcess = null;
   }
 
   private handleHubMessage(data: string) {
@@ -101,18 +170,29 @@ export class ClaudeAdapter {
         if (msg.id) {
             this.requestMap.set(msg.id, msg.returnTo || msg.from);
         }
+        const promptText =
+          typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload);
+        let content = promptText;
+        if (this.autonomousModeEnabled && msg.from === 'lead') {
+          content = buildAutonomousPrompt(this.agentId, content);
+        }
+        if (this.textOnlyModeEnabled) {
+          content = buildTextOnlyPrompt(this.agentId, content);
+        }
+        this.ensureClaudeProcess();
         // Send to Claude with hidden system prompt instructions if it's the first message
         this.sendToClaude({
             type: "user",
             message: {
                 role: "user",
-                content: msg.payload
+                content
             }
         });
       } else if (msg.eventType === 'raw' && msg.payload) {
         if (msg.id) {
             this.requestMap.set(msg.id, msg.returnTo || msg.from);
         }
+        this.ensureClaudeProcess();
         this.sendToClaude(msg.payload);
       }
     } catch (e) {
@@ -178,6 +258,7 @@ export class ClaudeAdapter {
   }
 
   private sendToClaude(payload: any) {
+    this.ensureClaudeProcess();
     if (this.claudeProcess && this.claudeProcess.stdin && !this.claudeProcess.stdin.destroyed) {
       this.claudeProcess.stdin.write(JSON.stringify(payload) + "\n");
     }
@@ -187,14 +268,10 @@ export class ClaudeAdapter {
     if (this.isStopping) return;
     this.isStopping = true;
     
-    if (this.rl) {
-        this.rl.close();
-        this.rl = null;
-    }
     if (this.claudeProcess) {
         this.claudeProcess.kill();
-        this.claudeProcess = null;
     }
+    this.detachClaudeIo();
     if (this.hubWs) {
         this.hubWs.close();
         this.hubWs = null;
