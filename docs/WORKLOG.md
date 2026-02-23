@@ -144,3 +144,19 @@
   - `agent-tui` / `wtmux` / `wt` / `WSL+tmux` を主系にしない理由を簡潔に明記。
 - 出力ファイルパス:
   - `docs/RUNBOOK.md`
+
+### 2026/02/23 12:11:27 (JST)
+- 目的:
+  - `RUNBOOK` 復元コミットを push し、stash 残件を確認する。
+- 変更ファイル:
+  - `docs/WORKLOG.md`
+- 実行コマンド:
+  - `git push`
+  - `git stash list`
+  - `git stash show --stat "stash@{0}"`
+- 結果:
+  - `master -> origin/master` へ push 完了（`81c4748..222adf2`）。
+  - stash は 1 件残存: `stash@{0}: On master: safety-before-master-sync-20260223-074223`
+  - 残存 stash の内容は 60 files / 12681 insertions（同期前の安全退避スナップショット）。
+- 出力ファイルパス:
+  - なし（Git 状態確認）
