@@ -69,7 +69,7 @@ async function startCliHarness(): Promise<CliHarness> {
   };
 
   await waitForText('--- aiteam CLI ---');
-  await waitForText('Available agents: codex, claude, gemini');
+  await waitForText('Main agent: codex (default: codex)');
 
   const sendLine = (line: string) => {
     cliProcess.stdin!.write(`${line}${String.fromCharCode(10)}`);
@@ -102,18 +102,20 @@ describe('E2E: CLI UX and input resilience', () => {
     try {
       const output = harness.getOutput();
       expect(output).toContain('--- aiteam CLI ---');
+      expect(output).toContain('Main agent: codex (default: codex)');
       expect(output).toContain('Available agents: codex, claude, gemini');
-      expect(output).toContain('Type "@agent_name message" to send a prompt.');
+      expect(output).toContain('Type plain text to send tasks to codex.');
+      expect(output).toContain('Type "/status" to inspect self/peer connection states.');
       expect(output.toLowerCase()).not.toContain('tmux helper');
     } finally {
       await harness.stop();
     }
   }, 30000);
 
-  it('prints a clear hint for invalid input', async () => {
+  it('prints a clear hint for malformed explicit route', async () => {
     const harness = await startCliHarness();
     try {
-      harness.sendLine('hello');
+      harness.sendLine('@codex');
       await harness.waitForText('Invalid format. Use "@agent message".');
       expect(harness.getOutput()).toContain('Invalid format. Use "@agent message".');
     } finally {
@@ -121,17 +123,17 @@ describe('E2E: CLI UX and input resilience', () => {
     }
   }, 30000);
 
-  it('keeps running after malformed inputs and still exits cleanly', async () => {
+  it('accepts /status and stays responsive after malformed explicit routes', async () => {
     const harness = await startCliHarness();
     try {
       harness.sendLine('@codex');
       await harness.waitForText('Invalid format. Use "@agent message".');
 
-      harness.sendLine('');
+      harness.sendLine('@');
       await harness.waitForText('Invalid format. Use "@agent message".');
 
-      harness.sendLine('   ');
-      await harness.waitForText('Invalid format. Use "@agent message".');
+      harness.sendLine('/status');
+      await harness.waitForText('[status]');
     } finally {
       await harness.stop();
     }

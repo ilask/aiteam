@@ -289,6 +289,39 @@
 - 出力ファイルパス:
   - `src/__tests__/probes/`
 
+### 2026/02/23 20:06:04 (JST)
+- 目的:
+  - ユーザー報告の実行時不具合を修正する（旧UX混在、`/status` 非対応、重複表示、ポート競合、Claude権限確認、Gemini `AttachConsole failed`）。
+- 変更ファイル:
+  - 更新: `src/cli.ts`
+  - 更新: `src/index.ts`
+  - 更新: `src/adapters/claude.ts`
+  - 更新: `src/adapters/gemini.ts`
+  - 更新: `src/__tests__/e2e/cli-ux-resilience.spec.ts`
+  - 更新: `src/__tests__/e2e/headless-workflow.spec.ts`
+  - 更新: `README.md`
+  - 更新: `docs/WORKLOG.md`
+- 実行コマンド:
+  - `pnpm run build`
+  - `pnpm exec vitest run src/__tests__/hub.spec.ts src/__tests__/cli-output-filter.spec.ts src/__tests__/e2e/cli-ux-resilience.spec.ts src/__tests__/e2e/headless-workflow.spec.ts`
+  - `pnpm exec vitest run src/__tests__/adapters/codex.spec.ts src/__tests__/adapters/claude.spec.ts src/__tests__/adapters/gemini.spec.ts`
+  - `node dist/cli.js -h`
+  - `npm install -g . --force`
+  - `aiteam -h`
+- 結果:
+  - CLI を「plain text -> main agent（既定 codex）」UXへ更新し、`/status` を実装。
+  - `aiteam -h` を実装し、AI向けのロール/通信モデルを表示可能化。
+  - 4501競合時に空きポートへ自動フォールバックする挙動を実装（`[aiteam] Port ... is in use`）。
+  - CLI表示重複抑制を導入（短時間の同一 `[from,text]` のみ抑制）。
+  - `/status` に `routed.prompt` と `routed.delegate` を表示し、delegateカウントの意味を明記。
+  - Claude 起動引数に `--permission-mode` を導入し、既定を `bypassPermissions` 化（`AITEAM_CLAUDE_PERMISSION_MODE` で上書き可能）。
+  - Gemini は `stdin` 送信から `-p` one-shot 実行へ変更し、Windows では Node entrypoint fallback を使用するよう変更。
+  - グローバル実行時の無反応はエントリ判定のシンボリックリンク差分が原因だったため、`realpath` 比較に修正。
+  - 上記変更後、対象テストは pass（`15/15` + adapter `3/3`）。
+- 出力ファイルパス:
+  - `dist/cli.js`
+  - `dist/index.js`
+
 ### 2026/02/23 19:59:48 (JST)
 - 目的:
   - 確認依頼のファイル群をレビューし、重複出力抑止・`/status` 表示・ポートフォールバック・Gemini `-p`/Windows対策・Claude許可モードに潜在的な回帰がないかを評価する。

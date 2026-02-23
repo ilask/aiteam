@@ -34,14 +34,14 @@ describe('E2E: Headless Architecture Workflow', () => {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Timeout waiting for CLI ready')), 15000);
       const interval = setInterval(() => {
-        if (outputBuffer.includes('Available agents: codex, claude, gemini')) {
+        if (outputBuffer.includes('Main agent: codex (default: codex)')) {
           clearTimeout(timeout);
           clearInterval(interval);
           resolve();
         }
       }, 500);
     });
-  }, 20000);
+  }, 60000);
 
   afterAll(() => {
     if (cliProcess) {
@@ -52,13 +52,29 @@ describe('E2E: Headless Architecture Workflow', () => {
   it('should route message to codex and receive a response', async () => {
     // Clear buffer before test
     outputBuffer = '';
+
+    // Ensure codex is connected before first prompt to reduce startup flakiness.
+    cliProcess.stdin!.write('/status' + String.fromCharCode(10));
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('Timeout waiting for codex connected status')),
+        20000
+      );
+      const interval = setInterval(() => {
+        if (outputBuffer.includes('- codex: connected')) {
+          clearTimeout(timeout);
+          clearInterval(interval);
+          resolve();
+        }
+      }, 500);
+    });
     
     // Send a prompt to codex
-    cliProcess.stdin!.write('@codex Hello, are you there?' + String.fromCharCode(10));
+    cliProcess.stdin!.write('Hello, are you there?' + String.fromCharCode(10));
 
     // Wait for codex response
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout waiting for Codex response')), 15000);
+      const timeout = setTimeout(() => reject(new Error('Timeout waiting for Codex response')), 45000);
       const interval = setInterval(() => {
         // We look for [codex] in the output indicating a response
         if (outputBuffer.includes('[codex]')) {
@@ -70,7 +86,7 @@ describe('E2E: Headless Architecture Workflow', () => {
     });
 
     expect(outputBuffer).toContain('[codex]');
-  }, 20000);
+  }, 60000);
 
   it('should shutdown cleanly on exit command', async () => {
     cliProcess.stdin!.write('exit' + String.fromCharCode(10));

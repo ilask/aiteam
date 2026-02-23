@@ -5,10 +5,16 @@ import { ClaudeAdapter } from './adapters/claude.js';
 import { GeminiAdapter } from './adapters/gemini.js';
 import { WebSocket } from 'ws';
 import * as readline from 'readline';
+import * as net from 'net';
 import { fileURLToPath } from 'url';
 import * as path from 'path';
+import * as fs from 'fs';
 
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4501;
+const DEFAULT_PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4501;
+const SUPPORTED_AGENTS = ['codex', 'claude', 'gemini'] as const;
+type SupportedAgentId = (typeof SUPPORTED_AGENTS)[number];
+const DEFAULT_MAIN_AGENT: SupportedAgentId = 'codex';
+const CLI_MESSAGE_DEDUP_WINDOW_MS = 600;
 const IGNORED_RPC_METHODS = new Set([
   'thread/started',
   'thread/updated',
@@ -293,18 +299,176 @@ export function formatCliMessage(message: unknown): { from: string; text: string
   };
 }
 
+function isSupportedAgentId(value: string): value is SupportedAgentId {
+  return SUPPORTED_AGENTS.includes(value as SupportedAgentId);
+}
+
+function printAiOrientedHelp() {
+  console.log('aiteam - Agent Team CLI');
+  console.log('');
+  console.log('Usage:');
+  console.log('  aiteam [main-agent]');
+  console.log('  aiteam -h | --help');
+  console.log('');
+  console.log(`Main agent choices: ${SUPPORTED_AGENTS.join(', ')} (default: ${DEFAULT_MAIN_AGENT})`);
+  console.log('');
+  console.log('Runtime model:');
+  console.log('- visible role: lead (single user-facing prompt)');
+  console.log('- main role: selected main agent receives plain-text user input');
+  console.log('- peer roles: other agents run headless and communicate via hub routing');
+  console.log('');
+  console.log('Input model:');
+  console.log('- plain text: sent to main agent');
+  console.log('- @<agent> <task>: direct route to specific agent');
+  console.log('- /status: print self/main/peer connectivity and routed counters');
+  console.log('- exit | quit: shutdown');
+  console.log('');
+  console.log('Inter-agent contract:');
+  console.log('- agents delegate with a single line: @<agent> <task>');
+  console.log('- supported agent ids: codex, claude, gemini');
+  console.log('- autonomy policy: prefer agent-to-agent collaboration before lead reporting');
+}
+
+function parseCliArgs(argv: string[]): { showHelp: boolean; mainAgent: SupportedAgentId } {
+  let showHelp = false;
+  let mainAgent: SupportedAgentId = DEFAULT_MAIN_AGENT;
+  let hasMainAgentOverride = false;
+
+  for (const rawArg of argv) {
+    const arg = rawArg.trim();
+    if (!arg) {
+      continue;
+    }
+
+    if (arg === '-h' || arg === '--help') {
+      showHelp = true;
+      continue;
+    }
+
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+
+    if (hasMainAgentOverride) {
+      throw new Error(`Unexpected positional argument: ${arg}`);
+    }
+
+    if (!isSupportedAgentId(arg)) {
+      throw new Error(
+        `Unsupported main agent "${arg}". Supported: ${SUPPORTED_AGENTS.join(', ')}.`
+      );
+    }
+
+    hasMainAgentOverride = true;
+    mainAgent = arg;
+  }
+
+  return { showHelp, mainAgent };
+}
+
+async function canListenOnPort(port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      resolve(false);
+    });
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port);
+  });
+}
+
+async function allocateFreePort(): Promise<number> {
+  return new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.once('listening', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Failed to allocate a free port.')));
+        return;
+      }
+      const selectedPort = address.port;
+      server.close((closeError) => {
+        if (closeError) {
+          reject(closeError);
+          return;
+        }
+        resolve(selectedPort);
+      });
+    });
+    server.listen(0);
+  });
+}
+
+async function resolveHubPort(preferredPort: number): Promise<number> {
+  if (await canListenOnPort(preferredPort)) {
+    return preferredPort;
+  }
+  const fallbackPort = await allocateFreePort();
+  console.log(`[aiteam] Port ${preferredPort} is in use. Using port ${fallbackPort}.`);
+  return fallbackPort;
+}
+
+function formatHubStatus(hub: CentralHub, mainAgent: SupportedAgentId): string {
+  const snapshot = hub.getStatusSnapshot();
+  const connectedSet = new Set(snapshot.connectedAgents);
+  const pairSummary =
+    snapshot.routePairs.length > 0
+      ? snapshot.routePairs.map((pair) => `${pair.from}->${pair.to}=${pair.count}`).join(', ')
+      : '(none)';
+  const delegateCount =
+    snapshot.routeEvents.find((eventEntry) => eventEntry.eventType === 'delegate')?.count ?? 0;
+  const promptCount =
+    snapshot.routeEvents.find((eventEntry) => eventEntry.eventType === 'prompt')?.count ?? 0;
+
+  const lines = [
+    '[status]',
+    '- self(lead): connected',
+    `- main: ${mainAgent}`,
+    `- codex: ${connectedSet.has('codex') ? 'connected' : 'disconnected'}`,
+    `- claude: ${connectedSet.has('claude') ? 'connected' : 'disconnected'}`,
+    `- gemini: ${connectedSet.has('gemini') ? 'connected' : 'disconnected'}`,
+    `- routed.pairs: ${pairSummary}`,
+    `- routed.prompt: ${promptCount}`,
+    `- routed.delegate: ${delegateCount}`,
+    '- communication: user plain text routes to main; AI delegates via "@<agent> <task>"',
+    '- note: routed.delegate counts AI-origin delegate events only'
+  ];
+  return lines.join('\n');
+}
+
 async function main() {
+  let cliArgs: { showHelp: boolean; mainAgent: SupportedAgentId };
+  try {
+    cliArgs = parseCliArgs(process.argv.slice(2));
+  } catch (error) {
+    console.error(String((error as Error).message ?? error));
+    console.error('Use "aiteam -h" for usage.');
+    process.exit(1);
+    return;
+  }
+
+  if (cliArgs.showHelp) {
+    printAiOrientedHelp();
+    return;
+  }
+
+  const mainAgent = cliArgs.mainAgent;
+  const hubPort = await resolveHubPort(DEFAULT_PORT);
   console.log('Starting aiteam v2 (Headless Architecture)...');
   
   let hub: CentralHub;
   try {
-    hub = new CentralHub(PORT);
+    hub = new CentralHub(hubPort);
   } catch (err) {
     console.error('Failed to start Hub server:', err);
     process.exit(1);
+    return;
   }
   
-  const hubUrl = `ws://localhost:${PORT}`;
+  const hubUrl = `ws://localhost:${hubPort}`;
   const codex = new CodexAdapter(hubUrl, 'codex');
   const claude = new ClaudeAdapter(hubUrl, 'claude');
   const gemini = new GeminiAdapter(hubUrl, 'gemini');
@@ -319,44 +483,29 @@ async function main() {
   
   const rl = readline.createInterface({
     input: process.stdin,
-    output: process.stdout
+    output: process.stdout,
+    historySize: 1000
   });
 
   let isShuttingDown = false;
+  let systemMessageCount = 0;
+  const recentCliMessages = new Map<string, number>();
 
-  function promptUser() {
+  function showPrompt() {
     if (isShuttingDown) return;
-    rl.question('You> ', (line) => {
-      if (isShuttingDown) return;
-      const match = line.match(/^@(\w+)\s+([\s\S]*)$/);
-      if (match) {
-        const target = match[1];
-        let payload: any = match[2];
-        let eventType = 'prompt';
-
-                // Just send as a normal prompt to the target. Adapters should handle their own CLI specifics.
-                ws.send(JSON.stringify({
-                    from: 'lead',
-                    to: target,
-                    eventType,
-                    payload
-                }));      } else if (line.trim() === 'exit' || line.trim() === 'quit') {
-        cleanup();
-        return;
-      } else {
-        console.log('Invalid format. Use "@agent message".');
-      }
-      // Re-prompt immediately (in a real async flow we'd wait for response, but for now we just loop)
-      promptUser();
-    });
+    rl.setPrompt(`You(${mainAgent})> `);
+    rl.prompt();
   }
 
   ws.on('open', () => {
     ws.send(JSON.stringify({ type: 'identify', id: 'lead' }));
     console.log('\n--- aiteam CLI ---');
-    console.log('Available agents: codex, claude, gemini');
-    console.log('Type "@agent_name message" to send a prompt. Example: @claude hello');
-    promptUser();
+    console.log(`Main agent: ${mainAgent} (default: ${DEFAULT_MAIN_AGENT})`);
+    console.log(`Available agents: ${SUPPORTED_AGENTS.join(', ')}`);
+    console.log(`Type plain text to send tasks to ${mainAgent}.`);
+    console.log('Type "@agent message" for explicit routing.');
+    console.log('Type "/status" to inspect self/peer connection states.');
+    showPrompt();
   });
 
   ws.on('error', (err) => {
@@ -375,6 +524,15 @@ async function main() {
     try {
       const parsed = JSON.parse(data.toString());
       displayMessage = formatCliMessage(parsed);
+      if (!displayMessage) {
+        systemMessageCount += 1;
+        if (systemMessageCount === 1 || systemMessageCount % 5 === 0) {
+          readline.clearLine(process.stdout, 0);
+          readline.cursorTo(process.stdout, 0);
+          console.log(`\n[sys:${systemMessageCount}] waiting for ${mainAgent}...`);
+          showPrompt();
+        }
+      }
     } catch {
       return;
     }
@@ -383,10 +541,83 @@ async function main() {
       return;
     }
 
+    const now = Date.now();
+    for (const [messageKey, timestamp] of recentCliMessages.entries()) {
+      if (now - timestamp > CLI_MESSAGE_DEDUP_WINDOW_MS) {
+        recentCliMessages.delete(messageKey);
+      }
+    }
+    const dedupKey = `${displayMessage.from}\u0000${displayMessage.text}`;
+    const previous = recentCliMessages.get(dedupKey);
+    if (previous !== undefined && now - previous <= CLI_MESSAGE_DEDUP_WINDOW_MS) {
+      return;
+    }
+    recentCliMessages.set(dedupKey, now);
+
     readline.clearLine(process.stdout, 0);
     readline.cursorTo(process.stdout, 0);
     console.log(`\n[${displayMessage.from}] ${displayMessage.text}`);
-    rl.prompt(true);
+    showPrompt();
+  });
+
+  rl.on('line', (line) => {
+    if (isShuttingDown) {
+      return;
+    }
+
+    const rawLine = line ?? '';
+    const trimmedLine = rawLine.trim();
+
+    if (trimmedLine.length === 0) {
+      showPrompt();
+      return;
+    }
+
+    if (trimmedLine === 'exit' || trimmedLine === 'quit') {
+      cleanup();
+      return;
+    }
+
+    if (trimmedLine === '/status') {
+      readline.clearLine(process.stdout, 0);
+      readline.cursorTo(process.stdout, 0);
+      console.log(`\n${formatHubStatus(hub, mainAgent)}`);
+      showPrompt();
+      return;
+    }
+
+    let target: string = mainAgent;
+    let payload = rawLine;
+    const explicitRoute = rawLine.match(/^@(\w+)\s+([\s\S]*)$/);
+    if (explicitRoute) {
+      target = explicitRoute[1];
+      payload = explicitRoute[2];
+      if (payload.trim().length === 0) {
+        console.log('Invalid format. Use "@agent message".');
+        showPrompt();
+        return;
+      }
+    } else if (trimmedLine.startsWith('@')) {
+      console.log('Invalid format. Use "@agent message".');
+      showPrompt();
+      return;
+    }
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      console.log('[aiteam] Hub connection is not ready.');
+      showPrompt();
+      return;
+    }
+
+    ws.send(
+      JSON.stringify({
+        from: 'lead',
+        to: target,
+        eventType: 'prompt',
+        payload
+      })
+    );
+    showPrompt();
   });
 
   function cleanup() {
@@ -407,4 +638,30 @@ async function main() {
   process.on('SIGTERM', cleanup);
 }
 
-main().catch(console.error);
+function isExecutedAsEntryPoint(): boolean {
+  const entryScript = process.argv[1];
+  if (!entryScript) {
+    return false;
+  }
+
+  const normalizeForCompare = (pathLike: string): string => {
+    const resolved = path.resolve(pathLike);
+    const realPath = fs.existsSync(resolved) ? fs.realpathSync.native(resolved) : resolved;
+    return realPath.replace(/\\/g, '/').toLowerCase();
+  };
+
+  try {
+    const entryPath = normalizeForCompare(entryScript);
+    const modulePath = normalizeForCompare(fileURLToPath(import.meta.url));
+    return entryPath === modulePath;
+  } catch {
+    return false;
+  }
+}
+
+if (isExecutedAsEntryPoint()) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

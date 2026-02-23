@@ -111,7 +111,7 @@ export function resolveGeminiApiKeyFromEnv(
 }
 
 export function buildGeminiPromptArgs(
-  _promptText: string,
+  promptText: string,
   resumeSessionId?: string | null,
   approvalMode?: string | null
 ): string[] {
@@ -126,11 +126,12 @@ export function buildGeminiPromptArgs(
   if (resumeSessionId && resumeSessionId.trim().length > 0) {
     args.push('--resume', resumeSessionId.trim());
   }
+  args.push('-p', promptText);
   return args;
 }
 
 function buildGeminiTextPromptArgs(
-  _promptText: string,
+  promptText: string,
   resumeSessionId?: string | null,
   approvalMode?: string | null
 ): string[] {
@@ -145,6 +146,7 @@ function buildGeminiTextPromptArgs(
   if (resumeSessionId && resumeSessionId.trim().length > 0) {
     args.push('--resume', resumeSessionId.trim());
   }
+  args.push('-p', promptText);
   return args;
 }
 
@@ -367,11 +369,15 @@ export class GeminiAdapter {
       const args = generateMode
         ? buildGeminiTextPromptArgs(promptToSend, this.geminiSessionId)
         : buildGeminiPromptArgs(promptToSend, this.geminiSessionId);
+      const geminiCliEntrypoint = resolveGeminiCliEntrypoint();
+      const command = geminiCliEntrypoint ? process.execPath : 'gemini';
+      const spawnArgs = geminiCliEntrypoint ? [geminiCliEntrypoint, ...args] : args;
+      const useShell = process.platform === 'win32' && !geminiCliEntrypoint;
       let geminiProcess: ChildProcess;
       try {
-        geminiProcess = spawn('gemini', args, {
-          stdio: ['pipe', 'pipe', 'pipe'],
-          shell: process.platform === 'win32',
+        geminiProcess = spawn(command, spawnArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: useShell,
           env: this.getChildEnv()
         });
       } catch (err) {
@@ -420,11 +426,6 @@ export class GeminiAdapter {
           console.error('[GeminiAdapter] Gemini stderr:', line);
         }
       });
-
-      if (geminiProcess.stdin && !geminiProcess.stdin.destroyed) {
-        geminiProcess.stdin.write(`${promptToSend}\n`);
-        geminiProcess.stdin.end();
-      }
 
       geminiProcess.on('error', (err) => {
         clearTimeout(timeoutHandle);

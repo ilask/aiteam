@@ -16,12 +16,34 @@ const MessageSchema = z.object({
 
 type AgentMessage = z.infer<typeof MessageSchema>;
 
+type RoutePairSnapshot = {
+  from: string;
+  to: string;
+  count: number;
+};
+
+type RouteEventSnapshot = {
+  eventType: string;
+  count: number;
+};
+
+export type HubStatusSnapshot = {
+  connectedAgents: string[];
+  routePairs: RoutePairSnapshot[];
+  routeEvents: RouteEventSnapshot[];
+};
+
 export class CentralHub {
   private wss: WebSocketServer;
   private connections: Map<string, WebSocket> = new Map();
+  private routePairCounts: Map<string, number> = new Map();
+  private routeEventCounts: Map<string, number> = new Map();
 
   constructor(port: number) {
     this.wss = new WebSocketServer({ port });
+    this.wss.on('error', (err) => {
+      console.error('[CentralHub] WebSocket server error:', err);
+    });
     
     this.wss.on('connection', (ws, req) => {
       // Basic handshake: wait for identify message
@@ -81,11 +103,56 @@ export class CentralHub {
     const targetWs = this.connections.get(message.to);
     
     if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+      this.incrementRouteCounters(message.from, message.to, message.eventType);
       targetWs.send(JSON.stringify(message));
     } else {
       console.warn(`Target ${message.to} not connected.`);
       senderWs.send(JSON.stringify({ error: 'Delivery failed', target: message.to, reason: 'Target offline' }));
     }
+  }
+
+  private incrementRouteCounters(from: string, to: string, eventType: string) {
+    const pairKey = `${from}\u0000${to}`;
+    this.routePairCounts.set(pairKey, (this.routePairCounts.get(pairKey) ?? 0) + 1);
+
+    const normalizedEventType = eventType.trim() || 'unknown';
+    this.routeEventCounts.set(
+      normalizedEventType,
+      (this.routeEventCounts.get(normalizedEventType) ?? 0) + 1
+    );
+  }
+
+  public isConnected(agentId: string): boolean {
+    const ws = this.connections.get(agentId);
+    return ws !== undefined && ws.readyState === WebSocket.OPEN;
+  }
+
+  public getStatusSnapshot(): HubStatusSnapshot {
+    const connectedAgents = Array.from(this.connections.entries())
+      .filter(([, ws]) => ws.readyState === WebSocket.OPEN)
+      .map(([agentId]) => agentId)
+      .sort();
+
+    const routePairs = Array.from(this.routePairCounts.entries())
+      .map(([key, count]) => {
+        const [from, to] = key.split('\u0000');
+        return { from, to, count };
+      })
+      .sort((a, b) => {
+        if (a.from !== b.from) return a.from.localeCompare(b.from);
+        if (a.to !== b.to) return a.to.localeCompare(b.to);
+        return a.count - b.count;
+      });
+
+    const routeEvents = Array.from(this.routeEventCounts.entries())
+      .map(([eventType, count]) => ({ eventType, count }))
+      .sort((a, b) => a.eventType.localeCompare(b.eventType));
+
+    return {
+      connectedAgents,
+      routePairs,
+      routeEvents
+    };
   }
 
   public stop() {

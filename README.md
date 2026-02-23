@@ -44,6 +44,13 @@ To run `aiteam` from anywhere on your system:
 pnpm link --global
 ```
 
+When you pull new changes, re-install globally so `aiteam` outside the repo uses the latest `dist/cli.js`:
+
+```bash
+pnpm run build
+npm install -g . --force
+```
+
 Now you can start the Hub from any directory:
 
 ```bash
@@ -108,6 +115,18 @@ Runtime status snapshot:
 ```text
 /status
 ```
+
+## Common Runtime Issues
+
+- `Port 4501 is in use`:
+  - Expected fallback behavior: `aiteam` auto-selects another free port.
+- `aiteam` output looks like old `@agent`-only UX:
+  - Rebuild and reinstall globally (`npm install -g . --force`) so global shim points to latest build.
+- Claude asks permission before command/tool execution:
+  - Default adapter mode is `--permission-mode bypassPermissions`.
+  - Override with `AITEAM_CLAUDE_PERMISSION_MODE` if needed.
+- Gemini on Windows shows `AttachConsole failed`:
+  - Adapter runs Gemini with `-p` one-shot prompts and Windows Node entrypoint fallback to avoid `stdin`/PTY attach failures.
 
 ## Testing (Vitest)
 

@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 
 const AUTONOMOUS_MODE_DISABLED_VALUES = new Set(['0', 'false', 'off', 'no']);
 const ENABLED_VALUES = new Set(['1', 'true', 'on', 'yes']);
+const DEFAULT_CLAUDE_PERMISSION_MODE = 'bypassPermissions';
 
 function isAutonomousModeEnabled(rawValue: string | undefined): boolean {
   if (!rawValue) return true;
@@ -14,6 +15,14 @@ function isAutonomousModeEnabled(rawValue: string | undefined): boolean {
 function isTextOnlyModeEnabled(rawValue: string | undefined): boolean {
   if (!rawValue) return false;
   return ENABLED_VALUES.has(rawValue.trim().toLowerCase());
+}
+
+function resolveClaudePermissionMode(rawValue: string | undefined): string {
+  const normalized = rawValue?.trim();
+  if (!normalized) {
+    return DEFAULT_CLAUDE_PERMISSION_MODE;
+  }
+  return normalized;
 }
 
 function buildAutonomousPrompt(agentId: string, originalPrompt: string): string {
@@ -49,6 +58,7 @@ export class ClaudeAdapter {
   private isStopping: boolean = false;
   private autonomousModeEnabled: boolean;
   private textOnlyModeEnabled: boolean;
+  private claudePermissionMode: string;
   
   // Track requests for routing responses back
   // Map of messageId -> originating agent
@@ -62,6 +72,9 @@ export class ClaudeAdapter {
     );
     this.textOnlyModeEnabled = isTextOnlyModeEnabled(
       process.env.AITEAM_CLAUDE_TEXT_ONLY
+    );
+    this.claudePermissionMode = resolveClaudePermissionMode(
+      process.env.AITEAM_CLAUDE_PERMISSION_MODE
     );
   }
 
@@ -105,8 +118,16 @@ export class ClaudeAdapter {
     // console.debug('[ClaudeAdapter] Starting claude process (stdio streaming)');
     
     const cmd = 'claude';
-    
-    this.claudeProcess = spawn(cmd, ['--print', '--verbose', '--input-format=stream-json', '--output-format=stream-json'], {
+    const args = [
+      '--print',
+      '--verbose',
+      '--input-format=stream-json',
+      '--output-format=stream-json',
+      '--permission-mode',
+      this.claudePermissionMode
+    ];
+
+    this.claudeProcess = spawn(cmd, args, {
       stdio: ['pipe', 'pipe', 'ignore'],
       shell: process.platform === 'win32' // Required for some windows environments to find global npm binaries
     });
