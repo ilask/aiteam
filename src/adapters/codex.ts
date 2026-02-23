@@ -7,7 +7,7 @@ type JsonRecord = Record<string, unknown>;
 const AUTONOMOUS_MODE_DISABLED_VALUES = new Set(['0', 'false', 'off', 'no']);
 const SUPPORTED_TEAM_AGENT_IDS = new Set(['codex', 'claude', 'gemini']);
 const AUTONOMOUS_MODE_INHERIT_VALUES = new Set(['inherit', 'default', 'profile', 'none']);
-const DEFAULT_CODEX_REASONING_EFFORT = 'medium';
+const DEFAULT_CODEX_REASONING_EFFORT = 'high';
 const DEFAULT_CODEX_APPROVAL_POLICY = 'never';
 
 export function isCodexAutonomousModeEnabled(rawValue: string | undefined): boolean {

@@ -39,6 +39,22 @@
 - 出力ファイルパス:
   - `dist/cli.js`
 
+### 2026/02/24 00:18:44 (JST)
+- 目的:
+  - ユーザー要望に合わせて、Codex の既定 `model_reasoning_effort` を `medium` から `high` に変更する。
+- 変更ファイル:
+  - 更新: `src/adapters/codex.ts`
+  - 更新: `README.md`
+  - 更新: `docs/WORKLOG.md`
+- 実行コマンド:
+  - `pnpm run build`
+- 結果:
+  - `DEFAULT_CODEX_REASONING_EFFORT` を `high` に変更。
+  - README の既定値説明を `high` に更新。
+  - `build` 成功。
+- 出力ファイルパス:
+  - `dist/cli.js`
+
 ### 2026/02/24 00:04:25 (JST)
 - 目的:
   - リポジトリ説明依頼に対応するため、`README.md` / `docs/PROJECT_SPEC.md` / `docs/RUNBOOK.md` / `docs/WORKLOG.md` と主要実装 (`src/cli.ts`, `src/index.ts`, `src/adapters/codex.ts`) を確認して要点を整理する。

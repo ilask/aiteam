@@ -126,7 +126,7 @@ Runtime status snapshot:
   - Default adapter mode is `--permission-mode bypassPermissions`.
   - Override with `AITEAM_CLAUDE_PERMISSION_MODE` if needed.
 - Codex is slow or appears to hang on simple prompts:
-  - Adapter now starts Codex with `approval_policy="never"` and `model_reasoning_effort="medium"` by default.
+  - Adapter now starts Codex with `approval_policy="never"` and `model_reasoning_effort="high"` by default.
   - Override with `AITEAM_CODEX_APPROVAL_POLICY` / `AITEAM_CODEX_REASONING_EFFORT`.
   - Use `inherit` to defer to your global Codex profile config.
 - Claude command execution on Windows hits `bash ... dofork ... 0xC0000142`:
