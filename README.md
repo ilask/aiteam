@@ -125,6 +125,10 @@ Runtime status snapshot:
 - Claude asks permission before command/tool execution:
   - Default adapter mode is `--permission-mode bypassPermissions`.
   - Override with `AITEAM_CLAUDE_PERMISSION_MODE` if needed.
+- Codex is slow or appears to hang on simple prompts:
+  - Adapter now starts Codex with `approval_policy="never"` and `model_reasoning_effort="medium"` by default.
+  - Override with `AITEAM_CODEX_APPROVAL_POLICY` / `AITEAM_CODEX_REASONING_EFFORT`.
+  - Use `inherit` to defer to your global Codex profile config.
 - Claude command execution on Windows hits `bash ... dofork ... 0xC0000142`:
   - By default, Claude `Bash` is allowed.
   - If your environment is unstable, disable only Bash with `AITEAM_CLAUDE_ALLOW_BASH=0`.
@@ -133,6 +137,7 @@ Runtime status snapshot:
   - Adapter stderr is hidden by default to avoid log noise; enable it with `AITEAM_GEMINI_LOG_STDERR=1`.
 - `[sys:n] waiting for codex...` frequency tuning:
   - Adjust with `AITEAM_SYS_PROGRESS_INTERVAL_MS` (default: `5000` ms).
+  - Waiting banner includes elapsed seconds and blocks new prompts until the current target replies.
 
 ## Testing (Vitest)
 

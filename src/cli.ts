@@ -310,7 +310,26 @@ export function extractConversationalText(payload: unknown): string | null {
 
 export function formatCliMessage(message: unknown): { from: string; text: string } | null {
   const messageRecord = asRecord(message);
-  if (!messageRecord || typeof messageRecord.from !== 'string') {
+  if (!messageRecord) {
+    return null;
+  }
+
+  if (typeof messageRecord.error === 'string') {
+    const details: string[] = [];
+    if (typeof messageRecord.target === 'string') {
+      details.push(`target=${messageRecord.target}`);
+    }
+    if (typeof messageRecord.reason === 'string') {
+      details.push(messageRecord.reason);
+    }
+    const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
+    return {
+      from: 'hub',
+      text: `${messageRecord.error}${suffix}`
+    };
+  }
+
+  if (typeof messageRecord.from !== 'string') {
     return null;
   }
 
@@ -518,6 +537,8 @@ async function main() {
   let lastRenderedHiddenMessageCount = 0;
   let lastSystemProgressAt = 0;
   let waitingForResponse = false;
+  let waitingTarget: string | null = null;
+  let waitingStartedAt = 0;
   const recentCliMessages = new Map<string, number>();
   let systemProgressTimer: NodeJS.Timeout | null = null;
 
@@ -550,18 +571,23 @@ async function main() {
 
     lastSystemProgressAt = now;
     lastRenderedHiddenMessageCount = hiddenMessageCount;
+    const waitingOn = waitingTarget ?? mainAgent;
+    const elapsedMs = waitingStartedAt > 0 ? now - waitingStartedAt : 0;
+    const elapsedSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
     readline.clearLine(process.stdout, 0);
     readline.cursorTo(process.stdout, 0);
     if (hiddenMessageCount > 0) {
-      console.log(`\n[sys:${hiddenMessageCount}] waiting for ${mainAgent}...`);
+      console.log(`\n[sys:${hiddenMessageCount}] waiting for ${waitingOn}... (${elapsedSeconds}s)`);
     } else {
-      console.log(`\n[sys] waiting for ${mainAgent}...`);
+      console.log(`\n[sys] waiting for ${waitingOn}... (${elapsedSeconds}s)`);
     }
     showPrompt();
   }
 
-  function beginWaitingForResponse() {
+  function beginWaitingForResponse(target: string) {
     waitingForResponse = true;
+    waitingTarget = target;
+    waitingStartedAt = Date.now();
     hiddenMessageCount = 0;
     lastRenderedHiddenMessageCount = 0;
     lastSystemProgressAt = 0;
@@ -570,6 +596,8 @@ async function main() {
 
   function endWaitingForResponse() {
     waitingForResponse = false;
+    waitingTarget = null;
+    waitingStartedAt = 0;
     hiddenMessageCount = 0;
     lastRenderedHiddenMessageCount = 0;
     lastSystemProgressAt = 0;
@@ -602,10 +630,20 @@ async function main() {
 
   ws.on('message', (data) => {
     let displayMessage: { from: string; text: string } | null = null;
+    let sender: string | null = null;
     try {
       const parsed = JSON.parse(data.toString());
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        sender = typeof (parsed as Record<string, unknown>).from === 'string'
+          ? ((parsed as Record<string, unknown>).from as string)
+          : null;
+      }
       displayMessage = formatCliMessage(parsed);
-      if (!displayMessage) {
+      if (
+        !displayMessage &&
+        waitingForResponse &&
+        (!waitingTarget || sender === waitingTarget)
+      ) {
         hiddenMessageCount += 1;
         renderSystemProgress(false);
       }
@@ -617,7 +655,12 @@ async function main() {
       return;
     }
 
-    endWaitingForResponse();
+    if (
+      waitingForResponse &&
+      (displayMessage.from === 'hub' || !waitingTarget || displayMessage.from === waitingTarget)
+    ) {
+      endWaitingForResponse();
+    }
 
     const now = Date.now();
     for (const [messageKey, timestamp] of recentCliMessages.entries()) {
@@ -664,6 +707,13 @@ async function main() {
       return;
     }
 
+    if (waitingForResponse) {
+      const waitingOn = waitingTarget ?? mainAgent;
+      console.log(`[aiteam] Still waiting for ${waitingOn}. Please wait or use /status.`);
+      showPrompt();
+      return;
+    }
+
     let target: string = mainAgent;
     let payload = rawLine;
     const explicitRoute = rawLine.match(/^@(\w+)\s+([\s\S]*)$/);
@@ -695,7 +745,7 @@ async function main() {
         payload
       })
     );
-    beginWaitingForResponse();
+    beginWaitingForResponse(target);
     showPrompt();
   });
 

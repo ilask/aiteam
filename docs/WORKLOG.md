@@ -449,3 +449,34 @@
   - 対象テストは全 pass（`5 files / 16 tests`）。
 - 出力ファイルパス:
   - `dist/cli.js`
+
+### 2026/02/23 23:57:11 (JST)
+- 目的:
+  - ユーザー報告の「codex応答が見えない/遅い」現象を優先して、待機UXとCodex起動設定を改善する。
+- 変更ファイル:
+  - 更新: `src/adapters/codex.ts`
+  - 更新: `src/cli.ts`
+  - 更新: `src/__tests__/cli-output-filter.spec.ts`
+  - 更新: `README.md`
+  - 更新: `docs/WORKLOG.md`
+- 実行コマンド:
+  - `pnpm run build`
+  - `pnpm exec vitest run src/__tests__/cli-output-filter.spec.ts src/__tests__/adapters/codex.spec.ts src/__tests__/e2e/headless-workflow.spec.ts src/__tests__/e2e/cli-ux-resilience.spec.ts`
+  - `node tmp/codex_medium_probe.cjs`（Codex応答速度の実測）
+- 結果:
+  - Codex adapter:
+    - 既定で `approval_policy=\"never\"` と `model_reasoning_effort=\"medium\"` を `codex app-server` 起動時に適用。
+    - `AITEAM_CODEX_APPROVAL_POLICY` / `AITEAM_CODEX_REASONING_EFFORT` で上書き可能。
+    - `inherit/default/profile/none` 指定時は上書きせず、ユーザーのCodex設定を使用。
+    - 自律プロンプトに「単純な挨拶/1ステップ依頼は直接応答」の規則を追加。
+  - CLI:
+    - 待機表示を送信先ベースに変更（`waiting for <target>` + 経過秒）。
+    - 待機中の追加入力を抑止し、重ね打ちで詰まる状態を回避。
+    - 待機カウントは「現在待機中ターゲット由来の非表示メッセージ」のみ集計。
+    - Hubの配信エラー（`Delivery failed`）を `[hub] ...` として表示。
+  - テスト:
+    - 対象テストは pass（`4 files / 16 tests`）。
+  - 実測:
+    - `model_reasoning_effort=\"medium\"` 指定時、`sup` への初回 `agent_message` は約10秒で返答。
+- 出力ファイルパス:
+  - `dist/cli.js`

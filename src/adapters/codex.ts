@@ -6,6 +6,9 @@ import { randomUUID } from 'crypto';
 type JsonRecord = Record<string, unknown>;
 const AUTONOMOUS_MODE_DISABLED_VALUES = new Set(['0', 'false', 'off', 'no']);
 const SUPPORTED_TEAM_AGENT_IDS = new Set(['codex', 'claude', 'gemini']);
+const AUTONOMOUS_MODE_INHERIT_VALUES = new Set(['inherit', 'default', 'profile', 'none']);
+const DEFAULT_CODEX_REASONING_EFFORT = 'medium';
+const DEFAULT_CODEX_APPROVAL_POLICY = 'never';
 
 export function isCodexAutonomousModeEnabled(rawValue: string | undefined): boolean {
   if (!rawValue) return true;
@@ -17,6 +20,7 @@ export function buildCodexAutonomousPrompt(agentId: string, originalPrompt: stri
     `[aiteam autonomy mode: ${agentId}]`,
     'Prefer agent-to-agent collaboration before replying to lead.',
     'Delegate tasks with exactly one line: @<agent> <task>.',
+    'For simple greetings or one-step asks, answer directly without delegation.',
     'Do NOT use internal collab tools (spawnAgent, wait, closeAgent) or external-agent simulation.',
     'Use only @claude / @gemini delegation lines so the aiteam hub can route tasks.',
     'Allowed external agent IDs for delegation: codex, claude, gemini.',
@@ -30,6 +34,20 @@ export function buildCodexAutonomousPrompt(agentId: string, originalPrompt: stri
 
 export function isSupportedTeamAgentId(agentId: string): boolean {
   return SUPPORTED_TEAM_AGENT_IDS.has(agentId);
+}
+
+function resolveOptionalCodexConfig(
+  rawValue: string | undefined,
+  fallbackValue: string
+): string | null {
+  if (!rawValue) {
+    return fallbackValue;
+  }
+  const normalized = rawValue.trim().toLowerCase();
+  if (AUTONOMOUS_MODE_INHERIT_VALUES.has(normalized)) {
+    return null;
+  }
+  return rawValue.trim();
 }
 
 export function extractSupportedDelegationFromCodexPayload(
@@ -248,12 +266,22 @@ export class CodexAdapter {
   private pendingPrompts: { from: string, returnTo?: string, text: string }[] = [];
   private readonly recentDelegationTimestamps: Map<string, number> = new Map();
   private readonly delegationDedupWindowMs = 30000;
+  private readonly codexReasoningEffort: string | null;
+  private readonly codexApprovalPolicy: string | null;
 
   constructor(hubUrl: string, agentId: string = 'codex') {
     this.hubUrl = hubUrl;
     this.agentId = agentId;
     this.autonomousModeEnabled = isCodexAutonomousModeEnabled(
       process.env.AITEAM_AUTONOMOUS_MODE
+    );
+    this.codexReasoningEffort = resolveOptionalCodexConfig(
+      process.env.AITEAM_CODEX_REASONING_EFFORT,
+      DEFAULT_CODEX_REASONING_EFFORT
+    );
+    this.codexApprovalPolicy = resolveOptionalCodexConfig(
+      process.env.AITEAM_CODEX_APPROVAL_POLICY,
+      DEFAULT_CODEX_APPROVAL_POLICY
     );
   }
 
@@ -294,8 +322,15 @@ export class CodexAdapter {
     
     // Keep shell mode on Windows for compatibility with global codex command resolution.
     const cmd = 'codex';
+    const codexArgs = ['app-server'];
+    if (this.codexReasoningEffort) {
+      codexArgs.push('-c', `model_reasoning_effort="${this.codexReasoningEffort}"`);
+    }
+    if (this.codexApprovalPolicy) {
+      codexArgs.push('-c', `approval_policy="${this.codexApprovalPolicy}"`);
+    }
     
-    this.codexProcess = spawn(cmd, ['app-server'], {
+    this.codexProcess = spawn(cmd, codexArgs, {
       stdio: ['pipe', 'pipe', 'ignore'],
       shell: process.platform === 'win32'
     });

@@ -164,4 +164,17 @@ describe('CLI output filter', () => {
       text: 'Gemini CLI failed to attach console (exit=1)'
     });
   });
+
+  it('prints hub delivery errors as conversational text', () => {
+    const formatted = formatCliMessage({
+      error: 'Delivery failed',
+      target: 'unknown-agent',
+      reason: 'Target offline'
+    });
+
+    expect(formatted).toEqual({
+      from: 'hub',
+      text: 'Delivery failed (target=unknown-agent, Target offline)'
+    });
+  });
 });
