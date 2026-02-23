@@ -15,7 +15,7 @@ It contains crucial knowledge gathered from trial-and-error regarding:
 *   How to correctly format flags for non-interactive mode.
 
 ## ログ運用
-- 作業ごとに `docs/WORKLOG.md` を更新しgit commitする
+- 作業ごとに `docs/WORKLOG.md` を更新しgit commit&pushする
 - ユーザーへ返信する前に、その作業の `docs/WORKLOG.md` 追記を完了する
 - `docs/WORKLOG.md` には JST の日時を明記する
 - `docs/WORKLOG.md` が 400 行を超えたら、`docs/WORKLOG.md` は 100 行の要約に更新し、詳細ログは `docs/YYYYMMDD_WORKLOG_****.md` に退避する
