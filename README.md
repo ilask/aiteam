@@ -126,6 +126,12 @@ pnpm run test
 pnpm run test src/__tests__/e2e/
 ```
 
+### Test Layout
+
+- Active Node/Vitest tests: `src/__tests__/`
+- Legacy Python/tmux tests (reference only): `legacy/python-tests/`
+- Manual adapter probe scripts: `scripts/probes/`
+
 ## E2E Scenarios (Copy/Paste)
 
 The following examples map directly to existing E2E specs.

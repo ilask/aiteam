@@ -1,6 +1,6 @@
 ﻿# WORKLOG (Summary)
 
-最終更新: 2026/02/23 11:41:47 (JST)
+最終更新: 2026/02/23 12:05:02 (JST)
 
 ## アーカイブ
 - 詳細ログ退避先: `docs/20260223_WORKLOG_0742.md` (402 lines)
@@ -91,6 +91,32 @@
   - `tmp/local-notes/`
   - `docs/20260222_CODEX_IMPACT_SCOPE_GROWI.md`
   - `docs/20260223_GROWI_SEMANTIC_SEARCH_REVIEW_MATRIX.md`
+
+### 2026/02/23 12:05:02 (JST)
+- 目的:
+  - テスト配置の混在（`tests/`, `test-*.ts`, `src/__tests__`）を解消し、現行/レガシーを明確に分離する。
+- 変更ファイル:
+  - `legacy/python-tests/**` (旧 `tests/**` を移設)
+  - `scripts/probes/test-claude-stdio.ts`
+  - `scripts/probes/test-codex-rpc.ts`
+  - `scripts/probes/test-codex-stdio.ts`
+  - `scripts/probes/test-gemini-stdio.ts`
+  - `README.md`
+  - `docs/WORKLOG.md`
+- 実行コマンド:
+  - `git mv tests legacy/python-tests`
+  - `git mv test-*.ts scripts/probes/`
+  - `pnpm exec vitest run src/__tests__/hub.spec.ts`
+- 結果:
+  - Active test path を `src/__tests__/` に一本化。
+  - 旧 Python/tmux テストは `legacy/python-tests/` へ整理。
+  - 直下 probe スクリプトは `scripts/probes/` へ移設。
+  - README に `Test Layout` を追加し、現行/レガシーの置き場所を明記。
+  - 検証: `hub.spec.ts` 1/1 passed。
+- 出力ファイルパス:
+  - `legacy/python-tests/`
+  - `scripts/probes/`
+  - `README.md`
 
 ## 参考コミット
 - `8b4f500` Stabilize Windows inter-agent E2E flows
