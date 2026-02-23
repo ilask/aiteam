@@ -182,3 +182,34 @@
 - 出力ファイルパス:
   - `tmp/stash0_non_tests_preview.txt`
   - `tmp/stash0_non_tests_structure.txt`
+
+### 2026/02/23 12:22:27 (JST)
+- 目的:
+  - 旧 Python 系資産と `agent-tui` 運用資産を整理し、`stash@{0}` にのみ存在していた `docs` を取り込む。
+- 変更ファイル:
+  - 削除: `src/tmux_ai_team/**`, `legacy/python-tests/**`, `pyproject.toml`
+  - 追加: `docs/20260222_ARXIV_2601.22832v1_SUMMARY.md`
+  - 追加: `docs/20260222_CLAUDE_GROWI_SEMANTIC_ARCHITECTURE.md`
+  - 追加: `docs/20260222_GEMINI_DIAGRAM_GROWI.md`
+  - 追加: `docs/20260222_WORKLOG_0057.md`
+  - 追加: `docs/20260222_WORKLOG_1524.md`
+  - 追加: `docs/20260222_WORKLOG_2306.md`
+  - 更新: `README.md`, `.gitignore`, `docs/RUNBOOK.md`, `docs/WORKLOG.md`
+- 実行コマンド:
+  - `git rm -r src/tmux_ai_team legacy/python-tests pyproject.toml`
+  - `git checkout "stash@{0}" -- docs/20260222_*.md`
+  - `rg -n "agent-tui|agent_tui|legacy/python-tests|tmux_ai_team|pyproject.toml" README.md docs/RUNBOOK.md .gitignore src package.json scripts`
+  - `git diff --name-only --diff-filter=ACM "stash@{0}^1" "stash@{0}"`
+- 結果:
+  - Node/TS 現行運用に不要な Python 実装・テスト群をリポジトリから除去。
+  - `README.md` の legacy Python / `agent-tui` セクションを削除。
+  - `.gitignore` から Python 向け ignore を削除。
+  - `docs/RUNBOOK.md` から `agent-tui` 記述を除去。
+  - `HEAD` に無かった `docs/20260222_*` 6ファイルを取り込み完了。
+- 出力ファイルパス:
+  - `docs/20260222_ARXIV_2601.22832v1_SUMMARY.md`
+  - `docs/20260222_CLAUDE_GROWI_SEMANTIC_ARCHITECTURE.md`
+  - `docs/20260222_GEMINI_DIAGRAM_GROWI.md`
+  - `docs/20260222_WORKLOG_0057.md`
+  - `docs/20260222_WORKLOG_1524.md`
+  - `docs/20260222_WORKLOG_2306.md`

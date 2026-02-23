@@ -3,7 +3,7 @@
 ## 目的
 - Windows の受け入れテスト/E2E を `wezterm cli` 経由で再現可能にする。
 - 運用経路を `Windows PowerShell -> wezterm cli -> aiteam` に統一する。
-- `agent-tui` など代替手段は「不採用理由」を簡潔に残す。
+- 代替手段は「不採用理由」を簡潔に残す。
 
 ## 推奨実行経路 (2026-02-23)
 - メイン: `Windows PowerShell -> wezterm cli -> node dist/cli.js`
@@ -84,9 +84,6 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "cd 'C:\Users
   - `tmp/e2e-debug/*.ndjson` の `eventType=message_routed` / `fromConnection=gemini` を確認する。
 
 ## 他ツールを主系にしない理由 (簡潔版)
-- `agent-tui`:
-  - `WSL -> /init -> powershell.exe` 経路で `screenshot` が空になる再現がある。
-  - 入力重複表示・`[sys:1]` 表示位置問題など、受け入れテスト用途では不安定だった。
 - `wtmux`:
   - セッション共有/Detach-Attach など必要機能が未成熟で、受け入れ運用に不向き。
 - `Windows Terminal (wt)`:

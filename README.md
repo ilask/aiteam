@@ -129,7 +129,6 @@ pnpm run test src/__tests__/e2e/
 ### Test Layout
 
 - Active Node/Vitest tests: `src/__tests__/`
-- Legacy Python/tmux tests (reference only): `legacy/python-tests/`
 - Manual adapter probe scripts: `scripts/probes/`
 
 ## E2E Scenarios (Copy/Paste)
@@ -208,11 +207,3 @@ $listener.Stop()
 ## E2E Dataset (Agent Teams Evaluation)
 
 The repository includes a git submodule pointing to `weseek/growi` to evaluate complex Agent Teams collaboration (e.g. semantic search implementation). See `e2e-dataset/growi-semantic-search-task/TASK_SPEC.md` for details.
-
-## agent-tui Retry Helper (WSL)
-
-When driving `aiteam` through `agent-tui`, temporary IPC errors may occur and are marked `retryable: true` in JSON output. Use `scripts/agent_tui_retry.sh` to wrap commands with exponential backoff:
-
-```bash
-scripts/agent_tui_retry.sh ~/.local/bin/agent-tui --json -s "$SESSION_ID" wait "[codex]" --assert -t 90000
-```
