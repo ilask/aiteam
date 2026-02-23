@@ -288,3 +288,28 @@
   - probe は `*.spec.ts` / `*.test.ts` 命名ではないため、Vitest の通常実行対象には含まれない。
 - 出力ファイルパス:
   - `src/__tests__/probes/`
+
+### 2026/02/23 19:59:48 (JST)
+- 目的:
+  - 確認依頼のファイル群をレビューし、重複出力抑止・`/status` 表示・ポートフォールバック・Gemini `-p`/Windows対策・Claude許可モードに潜在的な回帰がないかを評価する。
+- 変更ファイル:
+  - `docs/WORKLOG.md`
+- 実行コマンド:
+  - `type README.md`
+  - `type docs/PROJECT_SPEC.md`
+  - `type docs/RUNBOOK.md`
+  - `Get-Content docs/WORKLOG.md -Tail 60`
+  - `type src/cli.ts`
+  - `type src/index.ts`
+  - `type src/adapters/claude.ts`
+  - `type src/adapters/gemini.ts`
+  - `type src/__tests__/e2e/cli-ux-resilience.spec.ts`
+  - `type src/__tests__/e2e/headless-workflow.spec.ts`
+  - `python -c "from itertools import islice; lines=open('src/cli.ts').read().splitlines(); ...(dedup and /status slices)"`
+  - `python -c "from itertools import islice; lines=open('src/adapters/gemini.ts').read().splitlines(); ...(Gemini prompts/entrypoint slices)"`
+  - `python -c "from itertools import islice; lines=open('src/adapters/claude.ts').read().splitlines(); ...(Claude permission lines)"`
+- 結果:
+  - CLIの2秒以内同文メッセージ抑止（`src/cli.ts` 540 行付近）が再送された正当な応答も表示せず、`/status`の `routed.delegate` はユーザーが `@agent` で送ったルートを含まないため、期待した情報を返せないリスクが残る。
+  - Windowsフォールバック、Gemini の `-p` エントリ、Claude の `bypassPermissions` デフォルトはいずれも該当コード通りに維持されており、追加の懸念点は確認できなかった。
+- 出力ファイルパス:
+  - なし（レビュー記録）
